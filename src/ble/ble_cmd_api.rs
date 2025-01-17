@@ -1,10 +1,15 @@
+use crate::error::Result;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, oneshot};
 
 pub type Address = String;
-pub type BleBuffer = Vec<u8>;
 pub type Responder<T> = oneshot::Sender<T>;
 
-use crate::error::Result;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DataChunk {
+    pub remain_len: usize,
+    pub payload: String,
+}
 
 //Query
 #[derive(Debug)]
@@ -18,16 +23,16 @@ pub struct Query<RespType> {
 #[derive(Debug)]
 pub struct Cmd<RespType> {
     pub addr: Address,
-    pub payload: BleBuffer,
+    pub payload: DataChunk,
     pub resp: Responder<Result<RespType>>,
 }
 
-pub type BleQuery = Query<BleBuffer>;
+pub type BleQuery = Query<DataChunk>;
 pub type BleCmd = Cmd<()>;
 
 //PubSub
-pub type PubSubPublisher = broadcast::Sender<BleBuffer>;
-pub type PubSubSubscriber = broadcast::Receiver<BleBuffer>;
+pub type PubSubPublisher = broadcast::Sender<DataChunk>;
+pub type PubSubSubscriber = broadcast::Receiver<DataChunk>;
 pub type BleSub = Query<PubSubSubscriber>;
 pub type BlePub = Cmd<()>;
 

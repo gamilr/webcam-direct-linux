@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use super::{
-    ble_cmd_api::{Address, BleBuffer, PubSubPublisher, PubSubSubscriber},
+    ble_cmd_api::{Address, DataChunk, PubSubPublisher, PubSubSubscriber},
     ble_server::MultiMobileCommService,
 };
 use crate::vdevice_builder::VDevice;
@@ -134,11 +134,13 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
     }
 }
 
+
+//TODO: split the data chunk handling and the Mobile state machine logic 
 #[async_trait]
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
 {
-    fn device_disconnected(&mut self, addr: Address) -> Result<()> {
+    async fn device_disconnected(&mut self, addr: Address) -> Result<()> {
         if let Some(connected_data) = self.mobiles_connected.remove(&addr) {
             if let MobileDataState::ReadyToStream { virtual_devices } =
                 connected_data.mobile_state
@@ -163,9 +165,9 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         Ok(())
     }
 
-    fn read_host_info(
+    async fn read_host_info(
         &mut self, addr: Address, max_buffer_len: usize,
-    ) -> Result<BleBuffer> {
+    ) -> Result<DataChunk> {
         info!("Host info requested by: {:?}", addr);
 
         let total_len = self.host_info.len();
@@ -229,8 +231,8 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         Err(anyhow!("Mobile is not reading host info"))
     }
 
-    fn set_register_mobile(
-        &mut self, addr: Address, data: BleBuffer,
+    async fn set_register_mobile(
+        &mut self, addr: Address, data: DataChunk,
     ) -> Result<()> {
         info!("Registering mobile: {:?}", addr);
 
@@ -274,8 +276,8 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         Ok(())
     }
 
-    fn set_mobile_pnp_id(
-        &mut self, addr: Address, data: BleBuffer,
+    async fn set_mobile_pnp_id(
+        &mut self, addr: Address, data: DataChunk,
     ) -> Result<()> {
         info!("Mobile Pnp ID: {:?}", addr);
 
@@ -389,8 +391,8 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         Ok(self.sdp_caller.publisher.subscribe())
     }
 
-    fn set_mobile_sdp_resp(
-        &mut self, addr: String, data: BleBuffer,
+    async fn set_mobile_sdp_resp(
+        &mut self, addr: String, data: DataChunk,
     ) -> Result<()> {
         if let ConnectedMobileData {
             mobile_state: MobileDataState::ReadyToStream { .. },
