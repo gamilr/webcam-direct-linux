@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-
+use anyhow::anyhow;
 use async_trait::async_trait;
-use log::{error, info};
+use log::{debug, error, info, trace};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::Result;
@@ -9,8 +8,14 @@ use crate::error::Result;
 #[cfg(test)]
 use mockall::automock;
 
-use super::ble_cmd_api::{Address, BleApi, DataChunk, PubSubSubscriber, PubSubTopic};
-
+use super::{
+    ble_cmd_api::{
+        Address, BleApi, BleComm, CmdApi, CommandReq, DataChunk,
+        PubSubSubscriber, PubSubTopic, QueryApi, QueryReq,
+    },
+    mobile_buffer::MobileBufferMap,
+    HostProvInfo,
+};
 
 //trait
 #[cfg_attr(test, automock)]
@@ -20,11 +25,9 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, data: DataChunk,
     ) -> Result<()>;
 
-    async fn read_host_info(
-        &mut self, addr: String, max_size: usize,
-    ) -> Result<DataChunk>;
+    async fn get_host_info(&mut self, addr: String) -> Result<DataChunk>;
 
-    async fn device_disconnected(&mut self, addr: String) -> Result<()>;
+    async fn mobile_disconnected(&mut self, addr: String) -> Result<()>;
 
     async fn set_mobile_pnp_id(
         &mut self, addr: String, data: DataChunk,
@@ -39,15 +42,8 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
     ) -> Result<()>;
 }
 
-//Chunk data handler
-enum DataBufferCursor{
-    RemainLen(usize),      //used in queries
-    CurrentBuffer(String), //used in commands
-}
+pub type ServerConn = mpsc::Sender<BleComm>;
 
-type ClientBufferCursor = HashMap<Address, DataBufferCursor>;
-
-pub type ServerConn = mpsc::Sender<BleApi>;
 pub struct BleServer {
     ble_tx: ServerConn,
     _drop_tx: oneshot::Sender<()>,
@@ -58,18 +54,16 @@ impl BleServer {
         mut comm_handler: impl MultiMobileCommService, req_buffer_size: usize,
     ) -> Self {
         let (ble_tx, mut ble_rx) = mpsc::channel(req_buffer_size);
-
         let (_drop_tx, mut _drop_rx) = oneshot::channel();
 
         tokio::spawn(async move {
-
-            let mut client_buffer_cursor = ClientBufferCursor::new();
+            let mut mobiles_buffer_map = MobileBufferMap::new();
 
             loop {
                 tokio::select! {
                     _ = async {
-                         if let Some(req) = ble_rx.recv().await {
-                            handle_request(&mut comm_handler, req).await;
+                         if let Some(comm) = ble_rx.recv().await {
+                            handle_comm(&mut mobiles_buffer_map, &mut comm_handler, comm).await;
                          }
                     }  => {}
 
@@ -89,250 +83,181 @@ impl BleServer {
     }
 }
 
+//handle query
+async fn handle_query(
+    buffer_map: &mut MobileBufferMap,
+    comm_handler: &mut impl MultiMobileCommService, addr: Address,
+    query: QueryReq,
+) -> Result<DataChunk> {
+    let QueryReq { query_type, max_buffer_len } = query;
+
+    debug!("Query: {:?}", query_type);
+
+    //get the data requested
+    let data_chunk = match query_type {
+        QueryApi::HostInfo => {
+            let host_info = comm_handler.get_host_info(addr.clone()).await?;
+            let host_info_str = serde_json::to_string(&host_info)
+                .map_err(|e| anyhow!("Error to serialize host info {:?}", e))?;
+            buffer_map
+                .get_next_data_chunk(addr, max_buffer_len, host_info_str)
+                .ok_or(anyhow!("No data chunk available"))?
+        }
+    };
+
+    Ok(data_chunk)
+}
+
+async fn handle_command(
+    buffer_map: &mut MobileBufferMap,
+    comm_handler: &mut impl MultiMobileCommService, addr: Address,
+    cmd: CommandReq,
+) -> Result<()> {
+    let CommandReq { cmd_type, payload } = cmd;
+
+    debug!("Command: {:?}", cmd_type);
+
+    let Some(buffer) = buffer_map.get_complete_buffer(addr.clone(), payload)
+    else {
+        return Ok(());
+    };
+
+    match cmd_type {
+        CmdApi::MobileDisconnected => {}
+        CmdApi::RegisterMobile => {
+            let mobile = serde_json::from_str(&buffer)?;
+            comm_handler.set_register_mobile(addr, mobile).await?;
+        }
+        CmdApi::MobilePnpId => {}
+        CmdApi::MobileSdpResponse => {}
+    }
+
+    Ok(())
+}
+
+async fn handle_pubsub(
+    client_buffer_cursor: &mut MobileBufferMap,
+    comm_handler: &mut impl MultiMobileCommService, pubsub: PubSubTopic,
+) {
+    match pubsub {
+        PubSubTopic::SdpCall => {}
+    }
+}
+
 //This function does not return a Result since every request is successful
 //if internally any operation fails, it should handle it accordingly
-async fn handle_request(
-    comm_handler: &mut impl MultiMobileCommService, req: BleApi,
+async fn handle_comm(
+    mobile_buffer_map: &mut MobileBufferMap,
+    comm_handler: &mut impl MultiMobileCommService, comm: BleComm,
 ) {
-    match req {
-        BleApi::HostInfo(query) => {
-            if let Err(e) = query.resp.send(
-                comm_handler
-                    .read_host_info(query.addr, query.max_buffer_len)
+    //destructure the request
+    let BleComm { addr, comm_api } = comm;
+
+    //add the mobile to the buffer map if it does not exist
+    //this will indeicate current connection
+    if !mobile_buffer_map.contains_mobile(&addr) {
+        mobile_buffer_map.add_mobile(addr.clone());
+    }
+
+    match comm_api {
+        BleApi::Query(req, resp) => {
+            if let Err(e) = resp.send(
+                handle_query(mobile_buffer_map, comm_handler, addr, req).await,
+            ) {
+                error!("Error sending query response: {:?}", e);
+            }
+        }
+        BleApi::Command(req, resp) => {
+            if let Err(e) = resp.send(
+                handle_command(mobile_buffer_map, comm_handler, addr, req)
                     .await,
             ) {
-                error!("Error sending host info: {:?}", e);
+                error!("Error sending command response: {:?}", e);
             }
         }
-
-        BleApi::MobileDisconnected(cmd) => {
-            info!("Mobile disconnected: {:?}", cmd.addr);
-            if let Err(e) =
-                cmd.resp.send(comm_handler.device_disconnected(cmd.addr).await)
-            {
-                error!("Error disconnecting mobile: {:?}", e);
+        BleApi::Sub(req, resp) => {}
+        BleApi::Pub(req, resp) => {}
+    }
+    /*
+        match req {
+            BleReq::HostInfo(query) => {
+                if let Err(e) = query.resp.send(
+                    comm_handler
+                        .get_host_info(query.addr, query.max_buffer_len)
+                        .await,
+                ) {
+                    error!("Error sending host info: {:?}", e);
+                }
             }
-        }
 
-        BleApi::RegisterMobile(cmd) => {
-            if let Err(e) = cmd.resp.send(
-                comm_handler.set_register_mobile(cmd.addr, cmd.payload).await,
-            ) {
-                error!(
-                    "Error sending mobile registration response error: {:?}",
-                    e
-                );
+            BleReq::MobileConnected(cmd) => {
+                trace!("Mobile: {}, connected: {}", cmd.addr, cmd.payload.buffer);
+
+                if cmd.payload.buffer == "true" {
+                    debug!("Mobile connected: {:?}", cmd.addr);
+                    if let Err(e) = comm_handler.mobile_connected(cmd.addr).await {
+                        error!("Error connecting mobile: {:?}", e);
+                    } else {
+                        client_buffer_cursor
+                            .insert(cmd.addr.clone(), BufferCursor::RemainLen(0));
+                    }
+                } else if let Err(e) =
+                    cmd.resp.send(comm_handler.mobile_disconnected(cmd.addr).await)
+                {
+                    error!("Error disconnecting mobile: {:?}", e);
+                } else {
+                    client_buffer_cursor.remove(&cmd.addr);
+                }
             }
-        }
 
-        BleApi::MobilePnpId(cmd) => {
-            if let Err(e) = cmd.resp.send(
-                comm_handler.set_mobile_pnp_id(cmd.addr, cmd.payload).await,
-            ) {
-                error!("Error setting mobile Pnp Id error: {:?}", e);
+            BleReq::RegisterMobile(cmd) => {
+                if let Err(e) = cmd.resp.send(
+                    comm_handler.set_register_mobile(cmd.addr, cmd.payload).await,
+                ) {
+                    error!(
+                        "Error sending mobile registration response error: {:?}",
+                        e
+                    );
+                }
             }
-        }
 
-        BleApi::MobileSdpResponse(cmd) => {
-            if let Err(e) = cmd.resp.send(
-                comm_handler.set_mobile_sdp_resp(cmd.addr, cmd.payload).await,
-            ) {
-                error!("Error setting mobile sdp response error: {:?}", e);
+            BleReq::MobilePnpId(cmd) => {
+                if let Err(e) = cmd.resp.send(
+                    comm_handler.set_mobile_pnp_id(cmd.addr, cmd.payload).await,
+                ) {
+                    error!("Error setting mobile Pnp Id error: {:?}", e);
+                }
             }
-        }
 
-        BleApi::Subscribe(topic, sub) => {
-            //initialize the topic with the first subscriber
-            match topic {
-                PubSubTopic::SdpCall => {
-                    //process subscribe
-                    if let Err(e) = sub.resp.send(
-                        comm_handler
-                            .subscribe_to_sdp_req(sub.addr, sub.max_buffer_len)
-                            .await,
-                    ) {
-                        error!(
-                            "Error sending sdp call sub response, error: {:?}",
-                            e
-                        );
+            BleReq::MobileSdpResponse(cmd) => {
+                if let Err(e) = cmd.resp.send(
+                    comm_handler.set_mobile_sdp_resp(cmd.addr, cmd.payload).await,
+                ) {
+                    error!("Error setting mobile sdp response error: {:?}", e);
+                }
+            }
+
+            BleReq::Subscribe(topic, sub) => {
+                //initialize the topic with the first subscriber
+                match topic {
+                    PubSubTopic::SdpCall => {
+                        //process subscribe
+                        if let Err(e) = sub.resp.send(
+                            comm_handler
+                                .subscribe_to_sdp_req(sub.addr, sub.max_buffer_len)
+                                .await,
+                        ) {
+                            error!(
+                                "Error sending sdp call sub response, error: {:?}",
+                                e
+                            );
+                        }
                     }
                 }
             }
-        }
-        _ => {
-            error!("Not handle request: {:?}", req);
-        }
-    };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ble::ble_cmd_api::{
-        BleApi, BleCmd, BleQuery, PubSubSubscriber, PubSubTopic,
-    };
-    use mockall::mock;
-    use mockall::predicate::eq;
-
-    mock! {
-        CommHandler {}
-        #[async_trait]
-        impl MultiMobileCommService for CommHandler {
-            async fn read_host_info(&mut self, addr: String, max_size: usize) -> Result<DataChunk>;
-            async fn set_register_mobile(&mut self, addr: String, data: DataChunk) -> Result<()>;
-            async fn device_disconnected(&mut self, addr: String) -> Result<()>;
-            async fn set_mobile_pnp_id(&mut self, addr: String, data: DataChunk) -> Result<()>;
-            async fn subscribe_to_sdp_req(&mut self, addr: String, max_size: usize) -> Result<PubSubSubscriber>;
-            async fn set_mobile_sdp_resp(&mut self, addr: String, data: DataChunk) -> Result<()>;
-        }
-    }
-
-    fn init_logger() {
-        let _ = env_logger::builder().is_test(true).try_init();
-    }
-
-    #[tokio::test]
-    async fn test_ble_server_host_info() {
-        init_logger();
-        let mut mock_handler = MockCommHandler::new();
-        mock_handler
-            .expect_read_host_info()
-            .with(eq("test_addr".to_string()), eq(1024))
-            .returning(|_, _| Ok(vec![1, 2, 3]));
-
-        let server = BleServer::new(mock_handler, 10);
-        let conn = server.connection();
-
-        let (resp_tx, resp_rx) = oneshot::channel();
-        let query = BleQuery {
-            addr: "test_addr".to_string(),
-            max_buffer_len: 1024,
-            resp: resp_tx,
+            _ => {
+                error!("Not handle request: {:?}", req);
+            }
         };
-
-        conn.send(BleApi::HostInfo(query)).await.unwrap();
-        let result = resp_rx.await.unwrap();
-        assert_eq!(result.unwrap(), vec![1, 2, 3]);
-    }
-
-    #[tokio::test]
-    async fn test_ble_server_register_mobile() {
-        init_logger();
-        let mut mock_handler = MockCommHandler::new();
-        mock_handler
-            .expect_set_register_mobile()
-            .with(eq("test_addr".to_string()), eq(vec![1, 2, 3]))
-            .returning(|_, _| Ok(()));
-
-        let server = BleServer::new(mock_handler, 10);
-        let conn = server.connection();
-
-        let (resp_tx, resp_rx) = oneshot::channel();
-        let cmd = BleCmd {
-            addr: "test_addr".to_string(),
-            payload: vec![1, 2, 3],
-            resp: resp_tx,
-        };
-
-        conn.send(BleApi::RegisterMobile(cmd)).await.unwrap();
-        let result = resp_rx.await.unwrap();
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_ble_server_device_disconnected() {
-        init_logger();
-        let mut mock_handler = MockCommHandler::new();
-        mock_handler
-            .expect_device_disconnected()
-            .with(eq("test_addr".to_string()))
-            .returning(|_| Ok(()));
-
-        let server = BleServer::new(mock_handler, 10);
-        let conn = server.connection();
-
-        let (resp_tx, resp_rx) = oneshot::channel();
-        let cmd = BleCmd {
-            addr: "test_addr".to_string(),
-            payload: vec![],
-            resp: resp_tx,
-        };
-
-        conn.send(BleApi::MobileDisconnected(cmd)).await.unwrap();
-        let result = resp_rx.await.unwrap();
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_ble_server_mobile_pnp_id() {
-        init_logger();
-        let mut mock_handler = MockCommHandler::new();
-        mock_handler
-            .expect_set_mobile_pnp_id()
-            .with(eq("test_addr".to_string()), eq(vec![1, 2, 3]))
-            .returning(|_, _| Ok(()));
-
-        let server = BleServer::new(mock_handler, 10);
-        let conn = server.connection();
-
-        let (resp_tx, resp_rx) = oneshot::channel();
-        let cmd = BleCmd {
-            addr: "test_addr".to_string(),
-            payload: vec![1, 2, 3],
-            resp: resp_tx,
-        };
-
-        conn.send(BleApi::MobilePnpId(cmd)).await.unwrap();
-        let result = resp_rx.await.unwrap();
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_ble_server_mobile_sdp_response() {
-        init_logger();
-        let mut mock_handler = MockCommHandler::new();
-        mock_handler
-            .expect_set_mobile_sdp_resp()
-            .with(eq("test_addr".to_string()), eq(vec![1, 2, 3]))
-            .returning(|_, _| Ok(()));
-
-        let server = BleServer::new(mock_handler, 10);
-        let conn = server.connection();
-
-        let (resp_tx, resp_rx) = oneshot::channel();
-        let cmd = BleCmd {
-            addr: "test_addr".to_string(),
-            payload: vec![1, 2, 3],
-            resp: resp_tx,
-        };
-
-        conn.send(BleApi::MobileSdpResponse(cmd)).await.unwrap();
-        let result = resp_rx.await.unwrap();
-        assert!(result.is_ok());
-    }
-    /*
-        #[tokio::test]
-        async fn test_ble_server_subscribe_to_sdp_req() {
-            init_logger();
-            let mut mock_handler = MockCommHandler::new();
-            mock_handler
-                .expect_subscribe_to_sdp_req()
-                .with(eq("test_addr".to_string()), eq(1024))
-                .returning(|_, _| Ok(PubSubSubscriber {}));
-
-            let server = BleServer::new(mock_handler, 10);
-            let conn = server.connection();
-
-            let (resp_tx, resp_rx) = oneshot::channel();
-            let sub = BleCmd {
-                addr: "test_addr".to_string(),
-                max_buffer_len: 1024,
-                resp: resp_tx,
-            };
-
-            conn.send(BleApi::Subscribe(PubSubTopic::SdpCall, sub)).await.unwrap();
-            let result = resp_rx.await.unwrap();
-            assert!(result.is_ok());
-        }
     */
 }

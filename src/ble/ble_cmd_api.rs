@@ -2,64 +2,89 @@ use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, oneshot};
 
-pub type Address = String;
 pub type Responder<T> = oneshot::Sender<T>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DataChunk {
     pub remain_len: usize,
-    pub payload: String,
+    pub buffer: String,
 }
 
 //Query
 #[derive(Debug)]
-pub struct Query<RespType> {
-    pub addr: Address,
+pub struct QueryReq {
+    pub query_type: QueryApi,
     pub max_buffer_len: usize,
-    pub resp: Responder<Result<RespType>>,
 }
+pub type QueryResp = Responder<Result<DataChunk>>;
 
-//Cmd
+//Command
 #[derive(Debug)]
-pub struct Cmd<RespType> {
-    pub addr: Address,
+pub struct CommandReq {
+    pub cmd_type: CmdApi,
     pub payload: DataChunk,
-    pub resp: Responder<Result<RespType>>,
 }
-
-pub type BleQuery = Query<DataChunk>;
-pub type BleCmd = Cmd<()>;
+pub type CommandResp = Responder<Result<()>>;
 
 //PubSub
 pub type PubSubPublisher = broadcast::Sender<DataChunk>;
 pub type PubSubSubscriber = broadcast::Receiver<DataChunk>;
-pub type BleSub = Query<PubSubSubscriber>;
-pub type BlePub = Cmd<()>;
 
+//Sub
+pub struct SubReq {
+    pub topic: PubSubTopic,
+    pub max_buffer_len: usize,
+}
+pub type SubResp = Responder<Result<PubSubSubscriber>>;
+
+//Pub
+pub struct PubReq {
+    pub topic: PubSubTopic,
+    pub payload: DataChunk,
+}
+pub type PubResp = Responder<Result<()>>;
+
+//request BleApi
+pub enum BleApi {
+    Query(QueryReq, QueryResp),
+    Command(CommandReq, CommandResp),
+    Sub(SubReq, SubResp),
+    Pub(PubReq, PubResp),
+}
+
+//Ble Request
+pub type Address = String;
+
+pub struct BleComm {
+    pub addr: Address,
+    pub comm_api: BleApi,
+}
+
+//Ble API Command
+#[derive(Debug)]
+pub enum CmdApi {
+    //Mobile Connection status
+    MobileDisconnected,
+
+    //Register mobile
+    RegisterMobile,
+
+    //Mobile Pnp ID
+    MobilePnpId,
+
+    //Mobile SDP response
+    MobileSdpResponse,
+}
+
+//Ble API Query
+#[derive(Debug)]
+pub enum QueryApi {
+    //Read host info
+    HostInfo,
+}
+
+//Ble PubSub Topic
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub enum PubSubTopic {
     SdpCall, //SDP call pub/sub
-}
-
-//Ble API
-#[derive(Debug)]
-pub enum BleApi {
-    //Mobile Connection status
-    MobileDisconnected(BleCmd),
-
-    //Register mobile
-    RegisterMobile(BleCmd),
-
-    //Read host info
-    HostInfo(BleQuery),
-
-    //Mobile Pnp ID
-    MobilePnpId(BleCmd),
-
-    //Mobile SDP response
-    MobileSdpResponse(BleCmd),
-
-    //Publish/Subscribe API
-    Subscribe(PubSubTopic, BleSub),
-    Publish(PubSubTopic, BlePub),
 }

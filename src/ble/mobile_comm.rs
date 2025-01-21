@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
-use log::{error, info};
+use log::{error, info, trace};
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ struct BufferComm {
     pub payload: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct HostProvInfo {
     pub id: String,
     pub name: String,
@@ -60,17 +60,20 @@ pub trait AppDataStore: Send + Sync + 'static {
 }
 
 pub type VDeviceMap = HashMap<PathBuf, VDevice>;
+
 #[async_trait]
 pub trait VDeviceBuilderOps: Send + Sync + 'static {
     async fn create_from(&self, mobile: MobileSchema) -> Result<VDeviceMap>;
 }
 //States:
-//Provisioning:   ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
-//Identification: WriteMobileId->ReadyToStream
+//Provisioning:  Connected -> ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
+//Identification: Connected -> WriteMobileId->ReadyToStream
 //
 #[derive(Debug)]
 enum MobileDataState {
-    ReadHostInfo,
+    MobileConnected,
+
+    ReadingHostInfo,
 
     WriteMobileInfo,
 
@@ -134,13 +137,12 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
     }
 }
 
-
-//TODO: split the data chunk handling and the Mobile state machine logic 
+//TODO: split the data chunk handling and the Mobile state machine logic
 #[async_trait]
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
 {
-    async fn device_disconnected(&mut self, addr: Address) -> Result<()> {
+    async fn mobile_disconnected(&mut self, addr: Address) -> Result<()> {
         if let Some(connected_data) = self.mobiles_connected.remove(&addr) {
             if let MobileDataState::ReadyToStream { virtual_devices } =
                 connected_data.mobile_state
@@ -165,7 +167,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         Ok(())
     }
 
-    async fn read_host_info(
+    async fn get_host_info(
         &mut self, addr: Address, max_buffer_len: usize,
     ) -> Result<DataChunk> {
         info!("Host info requested by: {:?}", addr);
@@ -178,14 +180,14 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
             self.mobiles_connected.insert(
                 addr.clone(),
                 ConnectedMobileData {
-                    mobile_state: MobileDataState::ReadHostInfo,
+                    mobile_state: MobileDataState::ReadingHostInfo,
                     buffer_status: Some(CommBufferStatus::RemainLen(total_len)),
                 },
             );
         }
 
         if let ConnectedMobileData {
-            mobile_state: MobileDataState::ReadHostInfo,
+            mobile_state: MobileDataState::ReadingHostInfo,
             buffer_status: Some(CommBufferStatus::RemainLen(remain)),
         } = self
             .mobiles_connected

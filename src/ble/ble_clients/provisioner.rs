@@ -2,7 +2,7 @@
 use crate::error::Result;
 use crate::{
     ble::{
-        ble_cmd_api::{BleApi, BleCmd, BleQuery},
+        ble_cmd_api::{BleComm, BleCmd, BleQuery},
         ble_server::ServerConn,
     },
     gatt_const::{
@@ -83,7 +83,7 @@ pub async fn provisioner(
                             //prepare the cmd to send to the server
                             let (tx, rx) = oneshot::channel();
 
-                            let req = BleApi::HostInfo(BleQuery {
+                            let req = BleComm::HostInfo(BleQuery {
                                 addr: req.device_address.to_string(),
                                 max_buffer_len: req.mtu as usize,
                                 resp: tx,
@@ -130,7 +130,7 @@ pub async fn provisioner(
                             move |new_value, req| {
                                 //prepare the request to send to the server
                                 let (tx, rx) = oneshot::channel();
-                                let req = BleApi::RegisterMobile(BleCmd {
+                                let req = BleComm::RegisterMobile(BleCmd {
                                     addr: req.device_address.to_string(),
                                     payload: new_value,
                                     resp: tx,

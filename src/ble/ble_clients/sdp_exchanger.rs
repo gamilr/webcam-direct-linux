@@ -1,5 +1,5 @@
 use crate::ble::ble_cmd_api::{
-    BleApi, BleCmd, BleSub, PubSubSubscriber, PubSubTopic,
+    BleComm, BleCmd, BleSub, PubSubSubscriber, PubSubTopic,
 };
 use crate::ble::ble_server::ServerConn;
 use crate::error::Result;
@@ -59,7 +59,7 @@ async fn send_mobile_pnp_id(
 ) -> Result<()> {
     let (tx, rx) = oneshot::channel();
 
-    let cmd = BleApi::MobilePnpId(BleCmd {
+    let cmd = BleComm::MobilePnpId(BleCmd {
         addr: device_address,
         payload: new_value,
         resp: tx,
@@ -93,7 +93,7 @@ async fn send_subscriber(
         BleSub { addr: device_address, max_buffer_len: buffer_len, resp: tx };
 
     server_conn
-        .send(BleApi::Subscribe(PubSubTopic::SdpCall, ble_sub))
+        .send(BleComm::Subscribe(PubSubTopic::SdpCall, ble_sub))
         .await
         .map_err(|_| {
             error!("Error sending sdp call sub request");
