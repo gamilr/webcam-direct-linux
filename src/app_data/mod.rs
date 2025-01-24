@@ -16,8 +16,8 @@ pub use schemas::MobileId;
 pub use schemas::MobileSchema;
 use uuid::Uuid;
 
+use crate::ble::ble_server::HostProvInfo;
 use crate::ble::AppDataStore;
-use crate::ble::HostProvInfo;
 use crate::error::Result;
 
 /// A struct that holds the application's data store.

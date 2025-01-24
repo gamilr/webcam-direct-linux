@@ -42,6 +42,7 @@ pub struct PubReq {
     pub topic: PubSubTopic,
     pub payload: DataChunk,
 }
+
 pub type PubResp = Responder<Result<()>>;
 
 //request BleApi
@@ -84,7 +85,7 @@ pub enum QueryApi {
 }
 
 //Ble PubSub Topic
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum PubSubTopic {
     SdpCall, //SDP call pub/sub
 }

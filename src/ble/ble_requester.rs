@@ -1,9 +1,10 @@
 use crate::error::Result;
 use anyhow::anyhow;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::ble_cmd_api::{
-    BleApi, BleComm, CmdApi, CommandReq, DataChunk, QueryApi, QueryReq,
+    BleApi, BleComm, CmdApi, CommandReq, DataChunk, PubReq, PubSubPublisher,
+    PubSubSubscriber, PubSubTopic, QueryApi, QueryReq, SubReq,
 };
 
 #[derive(Clone)]
@@ -48,5 +49,64 @@ impl BleRequester {
         self.ble_tx.send(ble_comm).await?;
 
         rx.await?
+    }
+
+    pub async fn subscribe(
+        &self, addr: String, topic: PubSubTopic, max_buffer_len: usize,
+    ) -> Result<PubSubSubscriber> {
+        let sub_req = SubReq { topic, max_buffer_len };
+
+        let (tx, rx) = oneshot::channel();
+
+        let ble_comm = BleComm { addr, comm_api: BleApi::Sub(sub_req, tx) };
+
+        self.ble_tx.send(ble_comm).await?;
+
+        rx.await?
+    }
+
+    pub async fn publish(
+        &self, addr: String, topic: PubSubTopic, data: Vec<u8>,
+    ) -> Result<()> {
+        let pub_req = PubReq { topic, payload: serde_json::from_slice(&data)? };
+
+        let (tx, rx) = oneshot::channel();
+
+        let ble_comm = BleComm { addr, comm_api: BleApi::Pub(pub_req, tx) };
+
+        self.ble_tx.send(ble_comm).await?;
+
+        rx.await?
+    }
+}
+
+pub struct BlePublisher {
+    publisher_tx: PubSubPublisher,
+    max_buffer_len: usize,
+}
+
+impl BlePublisher {
+    pub fn new(max_buffer_len: usize) -> Self {
+        let (publisher_tx, _) = broadcast::channel(128);
+        Self { publisher_tx, max_buffer_len }
+    }
+
+    pub async fn publish(&self, data: DataChunk) -> Result<()> {
+        let DataChunk { remain_len, buffer } = data;
+
+        for chunk in buffer.as_bytes().chunks(self.max_buffer_len) {
+            let data_chunk = DataChunk {
+                remain_len: remain_len - chunk.len(),
+                buffer: String::from_utf8(chunk.to_vec())?,
+            };
+
+            self.publisher_tx.send(data_chunk)?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_subscriber(&self) -> PubSubSubscriber {
+        self.publisher_tx.subscribe()
     }
 }

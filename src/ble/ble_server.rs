@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use crate::app_data::{MobileId, MobileSchema};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use log::{debug, error, info, trace};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::error::Result;
 
@@ -12,10 +14,10 @@ use mockall::automock;
 
 use super::{
     ble_cmd_api::{
-        Address, BleApi, BleComm, CmdApi, CommandReq, DataChunk,
-        PubSubSubscriber, PubSubTopic, QueryApi, QueryReq,
+        Address, BleApi, BleComm, CmdApi, CommandReq, DataChunk, PubReq,
+        PubSubSubscriber, PubSubTopic, QueryApi, QueryReq, SubReq,
     },
-    ble_requester::BleRequester,
+    ble_requester::{BlePublisher, BleRequester},
     mobile_buffer::MobileBufferMap,
 };
 
@@ -42,12 +44,10 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, mobile_id: MobileId,
     ) -> Result<()>;
 
-    async fn subscribe_to_sdp_req(
-        &mut self, addr: String, max_size: usize,
-    ) -> Result<PubSubSubscriber>;
+    async fn subscribe_to_sdp_req(&mut self, addr: String) -> Result<()>;
 
     async fn set_mobile_sdp_resp(
-        &mut self, addr: String, data: DataChunk,
+        &mut self, addr: String, sdp: String,
     ) -> Result<()>;
 }
 
@@ -64,13 +64,13 @@ impl BleServer {
         let (_drop_tx, mut _drop_rx) = oneshot::channel();
 
         tokio::spawn(async move {
-            let mut mobiles_buffer_map = MobileBufferMap::new();
+            let mut ble_server_comm_handler = BleServerCommHandler::new();
 
             loop {
                 tokio::select! {
                     _ = async {
                          if let Some(comm) = ble_rx.recv().await {
-                            handle_comm(&mut mobiles_buffer_map, &mut comm_handler, comm).await;
+                            ble_server_comm_handler.handle_comm(&mut comm_handler, comm).await;
                          }
                     }  => {}
 
@@ -90,137 +90,167 @@ impl BleServer {
     }
 }
 
-//handle query
-async fn handle_query(
-    buffer_map: &mut MobileBufferMap,
-    comm_handler: &mut impl MultiMobileCommService, addr: Address,
-    query: QueryReq,
-) -> Result<DataChunk> {
-    let QueryReq { query_type, max_buffer_len } = query;
-
-    debug!("Query: {:?}", query_type);
-
-    //get the data requested
-    let data_chunk = match query_type {
-        QueryApi::HostInfo => {
-            let host_info = comm_handler.get_host_info(addr.clone()).await?;
-            let host_info_str = serde_json::to_string(&host_info)
-                .map_err(|e| anyhow!("Error to serialize host info {:?}", e))?;
-            buffer_map
-                .get_next_data_chunk(addr, max_buffer_len, host_info_str)
-                .ok_or(anyhow!("No data chunk available"))?
-        }
-    };
-
-    Ok(data_chunk)
+struct BleServerCommHandler {
+    pub buffer_map: MobileBufferMap,
+    pub pubsub_topics_map: HashMap<PubSubTopic, BlePublisher>,
 }
 
-async fn handle_command(
-    buffer_map: &mut MobileBufferMap,
-    comm_handler: &mut impl MultiMobileCommService, addr: Address,
-    cmd: CommandReq,
-) -> Result<()> {
-    let CommandReq { cmd_type, payload } = cmd;
-
-    debug!("Command: {:?}", cmd_type);
-
-    let Some(buffer) = buffer_map.get_complete_buffer(addr.clone(), payload)
-    else {
-        return Ok(());
-    };
-
-    match cmd_type {
-        CmdApi::MobileDisconnected => {
-            comm_handler.mobile_disconnected(addr.clone()).await?;
-            buffer_map.remove_mobile(addr);
+impl BleServerCommHandler {
+    pub fn new() -> Self {
+        Self {
+            buffer_map: MobileBufferMap::new(),
+            pubsub_topics_map: HashMap::new(),
         }
-        CmdApi::RegisterMobile => {
-            let mobile = serde_json::from_str(&buffer)?;
-            comm_handler.register_mobile(addr, mobile).await?;
-        }
-        CmdApi::MobilePnpId => {
-            comm_handler.set_mobile_pnp_id(addr, buffer).await?;
-        }
-        CmdApi::MobileSdpResponse => {}
     }
 
-    Ok(())
-}
+    //handle query
+    async fn handle_query(
+        &mut self, comm_handler: &mut impl MultiMobileCommService,
+        addr: Address, query: QueryReq,
+    ) -> Result<DataChunk> {
+        let QueryReq { query_type, max_buffer_len } = query;
 
-async fn handle_pubsub(
-    client_buffer_cursor: &mut MobileBufferMap,
-    comm_handler: &mut impl MultiMobileCommService, pubsub: PubSubTopic,
-) {
-    match pubsub {
-        PubSubTopic::SdpCall => {}
-    }
-}
+        debug!("Query: {:?}", query_type);
 
-//This function does not return a Result since every request is successful
-//if internally any operation fails, it should handle it accordingly
-async fn handle_comm(
-    mobile_buffer_map: &mut MobileBufferMap,
-    comm_handler: &mut impl MultiMobileCommService, comm: BleComm,
-) {
-    //destructure the request
-    let BleComm { addr, comm_api } = comm;
-
-    //add the mobile to the buffer map if it does not exist
-    //this will indeicate current connection
-    if !mobile_buffer_map.contains_mobile(&addr) {
-        mobile_buffer_map.add_mobile(addr.clone());
-    }
-
-    match comm_api {
-        BleApi::Query(req, resp) => {
-            if let Err(e) = resp.send(
-                handle_query(mobile_buffer_map, comm_handler, addr, req).await,
-            ) {
-                error!("Error sending query response: {:?}", e);
-            }
-        }
-        BleApi::Command(req, resp) => {
-            if let Err(e) = resp.send(
-                handle_command(mobile_buffer_map, comm_handler, addr, req)
-                    .await,
-            ) {
-                error!("Error sending command response: {:?}", e);
-            }
-        }
-        BleApi::Sub(req, resp) => {}
-        BleApi::Pub(req, resp) => {}
-    }
-    /*
-        match req {
-            BleReq::MobileSdpResponse(cmd) => {
-                if let Err(e) = cmd.resp.send(
-                    comm_handler.set_mobile_sdp_resp(cmd.addr, cmd.payload).await,
-                ) {
-                    error!("Error setting mobile sdp response error: {:?}", e);
-                }
-            }
-
-            BleReq::Subscribe(topic, sub) => {
-                //initialize the topic with the first subscriber
-                match topic {
-                    PubSubTopic::SdpCall => {
-                        //process subscribe
-                        if let Err(e) = sub.resp.send(
-                            comm_handler
-                                .subscribe_to_sdp_req(sub.addr, sub.max_buffer_len)
-                                .await,
-                        ) {
-                            error!(
-                                "Error sending sdp call sub response, error: {:?}",
-                                e
-                            );
-                        }
-                    }
-                }
-            }
-            _ => {
-                error!("Not handle request: {:?}", req);
+        //get the data requested
+        let data = match query_type {
+            QueryApi::HostInfo => {
+                let host_info =
+                    comm_handler.get_host_info(addr.clone()).await?;
+                serde_json::to_string(&host_info)?
             }
         };
-    */
+
+        //return the data
+        self.buffer_map
+            .get_next_data_chunk(addr, max_buffer_len, data)
+            .ok_or(anyhow!("No data chunk available"))
+    }
+
+    async fn handle_command(
+        &mut self, comm_handler: &mut impl MultiMobileCommService,
+        addr: Address, cmd: CommandReq,
+    ) -> Result<()> {
+        let CommandReq { cmd_type, payload } = cmd;
+
+        debug!("Command: {:?}", cmd_type);
+
+        let Some(buffer) =
+            self.buffer_map.get_complete_buffer(addr.clone(), payload)
+        else {
+            return Ok(());
+        };
+
+        match cmd_type {
+            CmdApi::MobileDisconnected => {
+                self.buffer_map.remove_mobile(addr.clone());
+                comm_handler.mobile_disconnected(addr).await
+            }
+            CmdApi::RegisterMobile => {
+                let mobile = serde_json::from_str(&buffer)?;
+                comm_handler.register_mobile(addr, mobile).await
+            }
+            CmdApi::MobilePnpId => {
+                comm_handler.set_mobile_pnp_id(addr, buffer).await
+            }
+            CmdApi::MobileSdpResponse => {
+                comm_handler.set_mobile_sdp_resp(addr, buffer).await
+            }
+        }
+    }
+
+    async fn handle_sub(
+        &mut self, comm_handler: &mut impl MultiMobileCommService,
+        addr: Address, sub: SubReq,
+    ) -> Result<PubSubSubscriber> {
+        let SubReq { topic, max_buffer_len } = sub;
+
+        //create the topic if it does not exist
+        if !self.pubsub_topics_map.contains_key(&topic) {
+            self.pubsub_topics_map
+                .insert(topic.clone(), BlePublisher::new(max_buffer_len));
+        }
+
+        //process the subscription
+        match topic {
+            PubSubTopic::SdpCall => {
+                comm_handler.subscribe_to_sdp_req(addr).await?
+            }
+        };
+
+        //return the subscriber
+        let Some(publisher) = self.pubsub_topics_map.get(&topic) else {
+            return Err(anyhow!("PubSub topic not found"));
+        };
+
+        return Ok(publisher.get_subscriber().await);
+    }
+
+    async fn handle_pub(
+        &mut self, comm_handler: &mut impl MultiMobileCommService,
+        addr: Address, pub_req: PubReq,
+    ) -> Result<()> {
+        let PubReq { topic, payload } = pub_req;
+
+        let Some(publisher) = self.pubsub_topics_map.get(&topic) else {
+            return Err(anyhow!("PubSub topic not found"));
+        };
+
+        match topic {
+            PubSubTopic::SdpCall => {
+                let payload = serde_json::to_string(&payload)?;
+                comm_handler.set_mobile_sdp_resp(addr, payload).await?;
+            }
+        };
+
+        publisher.publish(payload).await
+    }
+
+    //This function does not return a Result since every request is successful
+    //if internally any operation fails, it should handle it accordingly
+    pub async fn handle_comm(
+        &mut self, comm_handler: &mut impl MultiMobileCommService,
+        comm: BleComm,
+    ) {
+        //destructure the request
+        let BleComm { addr, comm_api } = comm;
+
+        //add the mobile to the buffer map if it does not exist
+        //this will indeicate current connection
+        if !self.buffer_map.contains_mobile(&addr) {
+            self.buffer_map.add_mobile(addr.clone());
+        }
+
+        match comm_api {
+            BleApi::Query(req, resp) => {
+                if let Err(e) =
+                    resp.send(self.handle_query(comm_handler, addr, req).await)
+                {
+                    error!("Error sending query response: {:?}", e);
+                }
+            }
+            BleApi::Command(req, resp) => {
+                if let Err(e) = resp
+                    .send(self.handle_command(comm_handler, addr, req).await)
+                {
+                    error!("Error sending command response: {:?}", e);
+                }
+            }
+            BleApi::Sub(req, resp) => {
+                if let Err(e) =
+                    resp.send(self.handle_sub(comm_handler, addr, req).await)
+                {
+                    error!("Error sending sub response: {:?}", e);
+                }
+            }
+
+            BleApi::Pub(req, resp) => {
+                if let Err(e) =
+                    resp.send(self.handle_pub(comm_handler, addr, req).await)
+                {
+                    error!("Error sending pub response: {:?}", e);
+                }
+            }
+        }
+    }
 }
