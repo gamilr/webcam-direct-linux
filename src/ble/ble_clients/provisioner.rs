@@ -1,14 +1,9 @@
 //! Serves a Bluetooth GATT application using the IO programming model.
+use crate::ble::ble_cmd_api::{CmdApi, CommandReq, QueryApi, QueryReq};
+use crate::ble::ble_requester::BleRequester;
 use crate::error::Result;
-use crate::{
-    ble::{
-        ble_cmd_api::{BleComm, BleCmd, BleQuery},
-        ble_server::ServerConn,
-    },
-    gatt_const::{
-        PROV_CHAR_HOST_INFO_UUID, PROV_CHAR_MOBILE_INFO_UUID,
-        PROV_SERV_HOST_UUID,
-    },
+use crate::gatt_const::{
+    PROV_CHAR_HOST_INFO_UUID, PROV_CHAR_MOBILE_INFO_UUID, PROV_SERV_HOST_UUID,
 };
 use bluer::{
     adv::{Advertisement, AdvertisementHandle},
@@ -28,7 +23,7 @@ pub struct ProvisionerClient {
 
 impl ProvisionerClient {
     pub fn new(
-        ble_adapter: Adapter, server_conn: ServerConn, host_name: String,
+        ble_adapter: Adapter, server_conn: BleRequester, host_name: String,
     ) -> Self {
         let (tx, rx) = oneshot::channel();
 
@@ -51,7 +46,7 @@ impl ProvisionerClient {
 }
 
 pub async fn provisioner(
-    adapter: Adapter, server_conn: ServerConn, host_name: String,
+    adapter: Adapter, server_conn: BleRequester, host_name: String,
 ) -> Result<(AdvertisementHandle, ApplicationHandle)> {
     info!(
         "Advertising Provisioner on Bluetooth adapter {} with address {}",
@@ -68,8 +63,8 @@ pub async fn provisioner(
 
     info!("Serving GATT service on Bluetooth adapter {}", adapter.name());
 
-    let reader_server_conn = server_conn.clone();
-    let writer_server_conn = server_conn.clone();
+    let reader_server_requester = server_conn.clone();
+    let writer_server_requester = server_conn.clone();
     let app = Application {
         services: vec![Service {
             uuid: PROV_SERV_HOST_UUID,
@@ -80,40 +75,29 @@ pub async fn provisioner(
                     read: Some(CharacteristicRead {
                         read: true,
                         fun: Box::new(move |req| {
-                            //prepare the cmd to send to the server
-                            let (tx, rx) = oneshot::channel();
-
-                            let req = BleComm::HostInfo(BleQuery {
-                                addr: req.device_address.to_string(),
-                                max_buffer_len: req.mtu as usize,
-                                resp: tx,
-                            });
-
-                            let reader_server_conn = reader_server_conn.clone();
-
+                            let reader_server_requester =
+                                reader_server_requester.clone();
                             async move {
-                                if let Err(_) =
-                                    reader_server_conn.send(req).await
+                                match reader_server_requester
+                                    .query(
+                                        req.device_address.to_string(),
+                                        QueryApi::HostInfo,
+                                        req.mtu as usize,
+                                    )
+                                    .await
                                 {
-                                    error!("Error sending host info request");
-                                    //return Err(ReqError::Failed);
-                                    return Ok(vec![]);
-                                }
-
-                                if let Ok(resp) = rx.await {
-                                    if let Ok(resp) = resp {
-                                        return Ok(resp);
-                                    } else {
-                                        error!("Error reading host info");
+                                    Ok(data) => {
+                                        return Ok(data);
                                     }
-                                } else {
-                                    error!(
-                                        "Error receiving host info response"
-                                    );
+                                    Err(e) => {
+                                        error!(
+                                            "Error reading host info, {:?}",
+                                            e
+                                        );
+                                    }
                                 }
 
-                                //Err(ReqError::Failed)
-                                Ok(vec![])
+                                Ok(vec![]) //TODO do I need always to return OK?
                             }
                             .boxed()
                         }),
@@ -128,36 +112,32 @@ pub async fn provisioner(
                         write_without_response: false,
                         method: CharacteristicWriteMethod::Fun(Box::new(
                             move |new_value, req| {
-                                //prepare the request to send to the server
-                                let (tx, rx) = oneshot::channel();
-                                let req = BleComm::RegisterMobile(BleCmd {
-                                    addr: req.device_address.to_string(),
-                                    payload: new_value,
-                                    resp: tx,
-                                });
-
-                                let writer_server_conn =
-                                    writer_server_conn.clone();
-
+                                let writer_server_requester =
+                                    writer_server_requester.clone();
                                 async move {
-                                        if let Err(_) = writer_server_conn.send(req).await {
-                                            error!("Error sending mobile registration request");
-                                            return Err(ReqError::Failed);
-                                        }
-
-                                        if let Ok(resp) = rx.await {
-                                            if let Ok(_) = resp {
-                                                return Ok(());
-                                            } else if let Err(e) = resp {
-                                                error!("Error writing mobile info, {:?}", e);
+                                    match writer_server_requester
+                                        .cmd(
+                                            req.device_address.to_string(),
+                                            CmdApi::RegisterMobile,
+                                            new_value
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                info!("Mobile info registered");
                                             }
-                                        } else {
-                                            error!("Error receiving mobile info response");
+                                            Err(e) => {
+                                                error!(
+                                                    "Error registering mobile info, {:?}",
+                                                    e
+                                                );
+                                            }
                                         }
 
-                                        //Err(ReqError::Failed)
-                                        Ok(())
-                                    }.boxed()
+
+                                    Ok(()) //TODO do I need always to return OK?
+                                }
+                                .boxed()
                             },
                         )),
                         ..Default::default()

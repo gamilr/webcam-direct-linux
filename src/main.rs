@@ -106,16 +106,16 @@ async fn main() -> Result<()> {
 
     let _provisioner = ProvisionerClient::new(
         adapter.clone(),
-        ble_server.connection(),
+        ble_server.get_requester(),
         host_prov_info.name.clone(),
     );
 
     let _mobile_prop_client =
-        MobilePropClient::new(adapter.clone(), ble_server.connection());
+        MobilePropClient::new(adapter.clone(), ble_server.get_requester());
 
     let _sdp_exchanger = SdpExchangerClient::new(
         adapter.clone(),
-        ble_server.connection(),
+        ble_server.get_requester(),
         host_prov_info.name.clone(),
         host_prov_info.id,
     );

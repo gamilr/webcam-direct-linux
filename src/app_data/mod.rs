@@ -12,6 +12,7 @@ use log::error;
 use log::info;
 pub use schemas::ConnectionType;
 pub use schemas::HostSchema;
+pub use schemas::MobileId;
 pub use schemas::MobileSchema;
 use uuid::Uuid;
 

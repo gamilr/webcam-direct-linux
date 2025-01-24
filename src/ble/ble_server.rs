@@ -1,6 +1,8 @@
+use crate::app_data::{MobileId, MobileSchema};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::{debug, error, info, trace};
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::Result;
@@ -13,24 +15,31 @@ use super::{
         Address, BleApi, BleComm, CmdApi, CommandReq, DataChunk,
         PubSubSubscriber, PubSubTopic, QueryApi, QueryReq,
     },
+    ble_requester::BleRequester,
     mobile_buffer::MobileBufferMap,
-    HostProvInfo,
 };
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct HostProvInfo {
+    pub id: String,
+    pub name: String,
+    pub connection_type: String,
+}
 
 //trait
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub trait MultiMobileCommService: Send + Sync + 'static {
-    async fn set_register_mobile(
-        &mut self, addr: String, data: DataChunk,
+    async fn register_mobile(
+        &mut self, addr: String, mobile: MobileSchema,
     ) -> Result<()>;
 
-    async fn get_host_info(&mut self, addr: String) -> Result<DataChunk>;
+    async fn get_host_info(&mut self, addr: String) -> Result<HostProvInfo>;
 
     async fn mobile_disconnected(&mut self, addr: String) -> Result<()>;
 
     async fn set_mobile_pnp_id(
-        &mut self, addr: String, data: DataChunk,
+        &mut self, addr: String, mobile_id: MobileId,
     ) -> Result<()>;
 
     async fn subscribe_to_sdp_req(
@@ -42,10 +51,8 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
     ) -> Result<()>;
 }
 
-pub type ServerConn = mpsc::Sender<BleComm>;
-
 pub struct BleServer {
-    ble_tx: ServerConn,
+    ble_req: BleRequester,
     _drop_tx: oneshot::Sender<()>,
 }
 
@@ -75,11 +82,11 @@ impl BleServer {
             }
         });
 
-        Self { ble_tx, _drop_tx }
+        Self { ble_req: BleRequester::new(ble_tx), _drop_tx }
     }
 
-    pub fn connection(&self) -> ServerConn {
-        self.ble_tx.clone()
+    pub fn get_requester(&self) -> BleRequester {
+        self.ble_req.clone()
     }
 }
 
@@ -123,12 +130,17 @@ async fn handle_command(
     };
 
     match cmd_type {
-        CmdApi::MobileDisconnected => {}
+        CmdApi::MobileDisconnected => {
+            comm_handler.mobile_disconnected(addr.clone()).await?;
+            buffer_map.remove_mobile(addr);
+        }
         CmdApi::RegisterMobile => {
             let mobile = serde_json::from_str(&buffer)?;
-            comm_handler.set_register_mobile(addr, mobile).await?;
+            comm_handler.register_mobile(addr, mobile).await?;
         }
-        CmdApi::MobilePnpId => {}
+        CmdApi::MobilePnpId => {
+            comm_handler.set_mobile_pnp_id(addr, buffer).await?;
+        }
         CmdApi::MobileSdpResponse => {}
     }
 
@@ -180,55 +192,6 @@ async fn handle_comm(
     }
     /*
         match req {
-            BleReq::HostInfo(query) => {
-                if let Err(e) = query.resp.send(
-                    comm_handler
-                        .get_host_info(query.addr, query.max_buffer_len)
-                        .await,
-                ) {
-                    error!("Error sending host info: {:?}", e);
-                }
-            }
-
-            BleReq::MobileConnected(cmd) => {
-                trace!("Mobile: {}, connected: {}", cmd.addr, cmd.payload.buffer);
-
-                if cmd.payload.buffer == "true" {
-                    debug!("Mobile connected: {:?}", cmd.addr);
-                    if let Err(e) = comm_handler.mobile_connected(cmd.addr).await {
-                        error!("Error connecting mobile: {:?}", e);
-                    } else {
-                        client_buffer_cursor
-                            .insert(cmd.addr.clone(), BufferCursor::RemainLen(0));
-                    }
-                } else if let Err(e) =
-                    cmd.resp.send(comm_handler.mobile_disconnected(cmd.addr).await)
-                {
-                    error!("Error disconnecting mobile: {:?}", e);
-                } else {
-                    client_buffer_cursor.remove(&cmd.addr);
-                }
-            }
-
-            BleReq::RegisterMobile(cmd) => {
-                if let Err(e) = cmd.resp.send(
-                    comm_handler.set_register_mobile(cmd.addr, cmd.payload).await,
-                ) {
-                    error!(
-                        "Error sending mobile registration response error: {:?}",
-                        e
-                    );
-                }
-            }
-
-            BleReq::MobilePnpId(cmd) => {
-                if let Err(e) = cmd.resp.send(
-                    comm_handler.set_mobile_pnp_id(cmd.addr, cmd.payload).await,
-                ) {
-                    error!("Error setting mobile Pnp Id error: {:?}", e);
-                }
-            }
-
             BleReq::MobileSdpResponse(cmd) => {
                 if let Err(e) = cmd.resp.send(
                     comm_handler.set_mobile_sdp_resp(cmd.addr, cmd.payload).await,

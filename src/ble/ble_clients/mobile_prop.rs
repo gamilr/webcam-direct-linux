@@ -1,15 +1,14 @@
 //! Discover Bluetooth devices and list them.
 use crate::{
     ble::{
-        ble_cmd_api::{BleApi, BleCmd},
-        ble_server::ServerConn,
+        ble_cmd_api::{CmdApi},
+        ble_requester::BleRequester,
     },
     error::Result,
 };
-use anyhow::anyhow;
 use bluer::{Adapter, AdapterEvent, DeviceEvent, DeviceProperty};
 use futures::{pin_mut, stream::SelectAll, StreamExt};
-use log::info;
+use log::{info, trace};
 
 use tokio::sync::oneshot;
 
@@ -18,7 +17,7 @@ pub struct MobilePropClient {
 }
 
 impl MobilePropClient {
-    pub fn new(ble_adapter: Adapter, server_conn: ServerConn) -> Self {
+    pub fn new(ble_adapter: Adapter, server_conn: BleRequester) -> Self {
         info!("Starting MobilePropClient");
 
         let (tx, rx) = oneshot::channel();
@@ -32,27 +31,8 @@ impl MobilePropClient {
     }
 }
 
-async fn send_mobile_disconnected(
-    server_conn: ServerConn, addr: String,
-) -> Result<()> {
-    let (tx, rx) = oneshot::channel();
-
-    if let Err(e) = server_conn
-        .send(BleApi::MobileDisconnected(BleCmd {
-            addr: addr.clone(),
-            payload: vec![],
-            resp: tx,
-        }))
-        .await
-    {
-        return Err(anyhow!("Failed to send mobile disconnected: {:?}", e));
-    }
-
-    rx.await?
-}
-
 pub async fn device_props(
-    adapter: Adapter, server_conn: ServerConn, mut _rx: oneshot::Receiver<()>,
+    adapter: Adapter, server_conn: BleRequester, mut _rx: oneshot::Receiver<()>,
 ) -> Result<()> {
     //let filter_addr: HashSet<_> = env::args().filter_map(|arg| arg.parse::<Address>().ok()).collect();
 
@@ -90,17 +70,17 @@ pub async fn device_props(
                     }
 
                     AdapterEvent::DeviceRemoved(addr) => {
-                        info!("Device removed: {addr}");
+                        trace!("Device removed: {addr}");
                     }
                     _ => (),
                 }
             }
 
             Some((addr, DeviceEvent::PropertyChanged(property))) = all_change_events.next() => {
-                info!("Property Device changed: {addr}");
-                info!("    {property:?}");
+                trace!("Property Device changed: {addr}");
+                trace!("    {property:?}");
                 if let DeviceProperty::Connected(false) = property {
-                    if let Err(e)  = send_mobile_disconnected(server_conn.clone(), addr.to_string()).await{
+                    if let Err(e)  = server_conn.cmd(addr.to_string(), CmdApi::MobileDisconnected, vec![]).await{
                         info!("Failed to send mobile disconnected: {:?}", e);
                     } else if let Err(e) = adapter.remove_device(addr).await {
                         info!("Failed to remove device: {:?}", e);

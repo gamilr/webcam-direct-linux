@@ -1,34 +1,21 @@
+use crate::app_data::{MobileId, MobileSchema};
 use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
 use log::{error, info, trace};
 
 use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use super::{
     ble_cmd_api::{Address, DataChunk, PubSubPublisher, PubSubSubscriber},
-    ble_server::MultiMobileCommService,
+    ble_server::{HostProvInfo, MultiMobileCommService},
 };
+use crate::error::Result;
 use crate::vdevice_builder::VDevice;
-use crate::{app_data::MobileSchema, error::Result};
 
 #[cfg(test)]
 use mockall::automock;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct BufferComm {
-    pub remain_len: usize,
-    pub payload: String,
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct HostProvInfo {
-    pub id: String,
-    pub name: String,
-    pub connection_type: String,
-}
 
 /*
  * This represent the json
@@ -66,14 +53,12 @@ pub trait VDeviceBuilderOps: Send + Sync + 'static {
     async fn create_from(&self, mobile: MobileSchema) -> Result<VDeviceMap>;
 }
 //States:
-//Provisioning:  Connected -> ReadHostInfo->WriteMobileInfo->WriteMobileId->ReadyToStream
-//Identification: Connected -> WriteMobileId->ReadyToStream
+//Provisioning:  ReadHostInfo->WriteMobileInfo
+//Identification: WriteMobileId->ReadyToStream
 //
 #[derive(Debug)]
-enum MobileDataState {
-    MobileConnected,
-
-    ReadingHostInfo,
+enum MobileState {
+    ReadHostInfo,
 
     WriteMobileInfo,
 
@@ -82,17 +67,6 @@ enum MobileDataState {
     SaveMobileData { mobile: MobileSchema },
 
     ReadyToStream { virtual_devices: VDeviceMap },
-}
-
-//State for the communication buffer
-enum CommBufferStatus {
-    RemainLen(usize),      //used in queries
-    CurrentBuffer(String), //used in commands
-}
-
-struct ConnectedMobileData {
-    pub mobile_state: MobileDataState,
-    pub buffer_status: Option<CommBufferStatus>,
 }
 
 //caller to send SDP data as a publisher
@@ -104,11 +78,10 @@ struct MobileSdpCaller {
 
 pub struct MobileComm<Db, VDevBuilder> {
     db: Db,
-    mobiles_connected: HashMap<Address, ConnectedMobileData>,
+    mobiles_connected: HashMap<Address, MobileState>,
     //index to get the mobile address from virtual device path
     vdevice_index: HashMap<PathBuf, Address>,
 
-    host_info: String,
     sdp_caller: MobileSdpCaller,
     vdev_builder: VDevBuilder,
 }
@@ -117,9 +90,6 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
     MobileComm<Db, VDevBuilder>
 {
     pub fn new(db: Db, vdev_builder: VDevBuilder) -> Result<Self> {
-        let host = db.get_host_prov_info()?;
-        let host_info = serde_json::to_string(&host)?;
-
         let (sender, _) = broadcast::channel(16);
         let sdp_caller = MobileSdpCaller {
             max_buffer_len: 19, //default mtu size 23 - 4 bytes for header
@@ -130,7 +100,6 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
             db,
             mobiles_connected: HashMap::new(),
             vdevice_index: HashMap::new(),
-            host_info,
             sdp_caller,
             vdev_builder,
         })
@@ -142,146 +111,47 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
 {
-    async fn mobile_disconnected(&mut self, addr: Address) -> Result<()> {
-        if let Some(connected_data) = self.mobiles_connected.remove(&addr) {
-            if let MobileDataState::ReadyToStream { virtual_devices } =
-                connected_data.mobile_state
-            {
-                //remove the virtual devices
-                for (path, _) in virtual_devices {
-                    info!("Removing index with path {:?}", path);
-                    if self.vdevice_index.remove(&path).is_none() {
-                        error!("Device not found in vdevice index {:?}", path);
-                    }
-                }
-            }
+    async fn get_host_info(&mut self, addr: Address) -> Result<HostProvInfo> {
+        trace!("Host info requested by: {:?}", addr);
 
-            info!(
-                "Mobile: {:?} disconnected and removed from connected devices",
-                addr
-            );
-        } else {
-            error!("Mobile not found in connected devices");
-            return Err(anyhow!("Mobile not found"));
-        }
-        Ok(())
+        //get the host info
+        let host_info = self.db.get_host_prov_info()?; //this should be cached
+
+        //update the state first state
+        self.mobiles_connected.insert(addr.clone(), MobileState::ReadHostInfo);
+
+        Ok(host_info)
     }
 
-    async fn get_host_info(
-        &mut self, addr: Address, max_buffer_len: usize,
-    ) -> Result<DataChunk> {
-        info!("Host info requested by: {:?}", addr);
-
-        let total_len = self.host_info.len();
-
-        //if mobile is not connected, add it with the state ReadHostInfo
-        //start condition
-        if !self.mobiles_connected.contains_key(&addr) {
-            self.mobiles_connected.insert(
-                addr.clone(),
-                ConnectedMobileData {
-                    mobile_state: MobileDataState::ReadingHostInfo,
-                    buffer_status: Some(CommBufferStatus::RemainLen(total_len)),
-                },
-            );
-        }
-
-        if let ConnectedMobileData {
-            mobile_state: MobileDataState::ReadingHostInfo,
-            buffer_status: Some(CommBufferStatus::RemainLen(remain)),
-        } = self
-            .mobiles_connected
-            .get_mut(&addr)
-            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
-        {
-            let initial_len = total_len - *remain;
-
-            let ble_comm = if max_buffer_len >= *remain {
-                *remain = total_len;
-                //move to next state
-                self.mobiles_connected.insert(
-                    addr.clone(),
-                    ConnectedMobileData {
-                        mobile_state: MobileDataState::WriteMobileInfo,
-                        buffer_status: Some(CommBufferStatus::CurrentBuffer(
-                            "".to_string(),
-                        )),
-                    },
-                );
-                info!("Mobile: {:?} in state WriteMobileInfo", addr);
-
-                BufferComm {
-                    remain_len: 0,
-                    payload: self.host_info[initial_len..total_len].to_owned(),
-                }
-            } else {
-                *remain -= max_buffer_len;
-                BufferComm {
-                    remain_len: *remain,
-                    payload: self.host_info
-                        [initial_len..initial_len + max_buffer_len]
-                        .to_owned(),
-                }
-            };
-
-            info!("Sending host info: {:?}", ble_comm);
-
-            return Ok(serde_json::to_vec(&ble_comm)?);
-        }
-
-        error!("Mobile is not reading host info");
-        Err(anyhow!("Mobile is not reading host info"))
-    }
-
-    async fn set_register_mobile(
-        &mut self, addr: Address, data: DataChunk,
+    async fn register_mobile(
+        &mut self, addr: Address, mobile: MobileSchema,
     ) -> Result<()> {
-        info!("Registering mobile: {:?}", addr);
+        trace!("Registering mobile: {:?}", addr);
 
-        if let ConnectedMobileData {
-            mobile_state: MobileDataState::WriteMobileInfo,
-            buffer_status: Some(CommBufferStatus::CurrentBuffer(current_buffer)),
-        } = self
-            .mobiles_connected
-            .get_mut(&addr)
-            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?
+        //check right state
+        if let Some(MobileState::ReadHostInfo) =
+            self.mobiles_connected.get(&addr)
         {
-            let buff_comm = serde_json::from_slice::<BufferComm>(&data)?;
+            //add the mobile to the db
+            self.db.add_mobile(&mobile)?;
 
-            info!("buff_comm {:?}", buff_comm);
-
-            current_buffer.push_str(&buff_comm.payload);
-
-            info!("current_buffer {:?}", buff_comm);
-
-            if buff_comm.remain_len == 0 {
-                let mobile = serde_json::from_str(&current_buffer)?;
-                self.db.add_mobile(&mobile)?;
-                info!("Mobile registered: {:?}", mobile);
-                //move to next state
-                self.mobiles_connected.insert(
-                    addr.clone(),
-                    ConnectedMobileData {
-                        mobile_state: MobileDataState::WriteMobileId,
-                        buffer_status: Some(CommBufferStatus::CurrentBuffer(
-                            "".to_string(),
-                        )),
-                    },
-                );
-                info!("Mobile: {:#?} in state WriteMobileId", mobile);
-            }
-        } else {
-            error!("Mobile is not writing mobile info");
-            return Err(anyhow!("Mobile is not writing mobile info"));
+            //move to next state
+            self.mobiles_connected
+                .insert(addr.clone(), MobileState::WriteMobileInfo);
         }
 
-        Ok(())
+        Err(anyhow!(
+            "Mobile {:?} cannot be registered whitout reading host info first",
+            addr
+        ))
     }
 
     async fn set_mobile_pnp_id(
-        &mut self, addr: Address, data: DataChunk,
+        &mut self, addr: Address, mobile_id: MobileId,
     ) -> Result<()> {
-        info!("Mobile Pnp ID: {:?}", addr);
+        trace!("Mobile Pnp ID: {:?}", addr);
+
+        let Ok(mobile) = self.db.get_mobile(&mobile_id);
 
         if !self.mobiles_connected.contains_key(&addr) {
             //new connection, already registered
@@ -314,7 +184,6 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
 
             if buff_comm.remain_len == 0 {
                 let mobile_id = current_buffer.clone();
-                if let Ok(mobile) = self.db.get_mobile(&mobile_id) {
                     info!("Mobile: {:#?} found", mobile);
                     //move to next State
                     self.mobiles_connected.insert(
@@ -422,6 +291,31 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
             return Err(anyhow!("Mobile is not ready to stream"));
         }
 
+        Ok(())
+    }
+
+    async fn mobile_disconnected(&mut self, addr: Address) -> Result<()> {
+        if let Some(connected_data) = self.mobiles_connected.remove(&addr) {
+            if let MobileDataState::ReadyToStream { virtual_devices } =
+                connected_data.mobile_state
+            {
+                //remove the virtual devices
+                for (path, _) in virtual_devices {
+                    info!("Removing index with path {:?}", path);
+                    if self.vdevice_index.remove(&path).is_none() {
+                        error!("Device not found in vdevice index {:?}", path);
+                    }
+                }
+            }
+
+            info!(
+                "Mobile: {:?} disconnected and removed from connected devices",
+                addr
+            );
+        } else {
+            error!("Mobile not found in connected devices");
+            return Err(anyhow!("Mobile not found"));
+        }
         Ok(())
     }
 }
