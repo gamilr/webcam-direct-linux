@@ -5,10 +5,9 @@ use async_trait::async_trait;
 use log::{debug, error, info, trace};
 
 use anyhow::anyhow;
-use tokio::sync::broadcast;
 
 use super::{
-    ble_cmd_api::{Address, PubSubPublisher},
+    ble_cmd_api::Address,
     ble_server::{HostProvInfo, MultiMobileCommService},
 };
 use crate::error::Result;
@@ -76,6 +75,7 @@ pub struct MobileComm<Db, VDevBuilder> {
     //index to get the mobile address from virtual device path
     vdevice_index: HashMap<PathBuf, Address>,
 
+    //virtual device builder
     vdev_builder: VDevBuilder,
 }
 
@@ -127,7 +127,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         }
 
         Err(anyhow!(
-            "Mobile {:?} cannot be registered whitout reading host info first",
+            "Mobile {:?} cannot be registered without reading host info first",
             addr
         ))
     }

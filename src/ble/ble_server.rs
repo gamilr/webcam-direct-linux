@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::error::Result;
 
@@ -91,8 +91,8 @@ impl BleServer {
 }
 
 struct BleServerCommHandler {
-    pub buffer_map: MobileBufferMap,
-    pub pubsub_topics_map: HashMap<PubSubTopic, BlePublisher>,
+    buffer_map: MobileBufferMap,
+    pubsub_topics_map: HashMap<PubSubTopic, BlePublisher>,
 }
 
 impl BleServerCommHandler {
