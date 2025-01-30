@@ -53,7 +53,7 @@ impl BleRequester {
 
     pub async fn subscribe(
         &self, addr: String, topic: PubSubTopic, max_buffer_len: usize,
-    ) -> Result<PubSubSubscriber> {
+    ) -> Result<BleSubscriber> {
         let sub_req = SubReq { topic, max_buffer_len };
 
         let (tx, rx) = oneshot::channel();
@@ -62,7 +62,7 @@ impl BleRequester {
 
         self.ble_tx.send(ble_comm).await?;
 
-        rx.await?
+        rx.await?.map(|subscriber| BleSubscriber::new(subscriber))
     }
 
     pub async fn publish(
@@ -108,5 +108,24 @@ impl BlePublisher {
 
     pub async fn get_subscriber(&self) -> PubSubSubscriber {
         self.publisher_tx.subscribe()
+    }
+}
+
+pub struct BleSubscriber {
+    subscriber_rx: PubSubSubscriber,
+}
+
+impl BleSubscriber {
+    pub fn new(subscriber_rx: PubSubSubscriber) -> Self {
+        Self { subscriber_rx }
+    }
+
+    pub async fn get_data(&mut self) -> Result<Vec<u8>> {
+        if let Ok(data_chunk) = self.subscriber_rx.recv().await {
+            return serde_json::to_vec(&data_chunk)
+                .map_err(|e| anyhow!("Error to serialize data chunk {:?}", e));
+        }
+
+        Err(anyhow!("Error to get data chunk"))
     }
 }
