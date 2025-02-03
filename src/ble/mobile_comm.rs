@@ -72,8 +72,6 @@ enum MobileState {
 pub struct MobileComm<Db, VDevBuilder> {
     db: Db,
     mobiles_connected: HashMap<Address, MobileState>,
-    //index to get the mobile address from virtual device path
-    vdevice_index: HashMap<PathBuf, Address>,
 
     //virtual device builder
     vdev_builder: VDevBuilder,
@@ -83,12 +81,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
     MobileComm<Db, VDevBuilder>
 {
     pub fn new(db: Db, vdev_builder: VDevBuilder) -> Result<Self> {
-        Ok(Self {
-            db,
-            mobiles_connected: HashMap::new(),
-            vdevice_index: HashMap::new(),
-            vdev_builder,
-        })
+        Ok(Self { db, mobiles_connected: HashMap::new(), vdev_builder })
     }
 }
 
@@ -156,15 +149,6 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
             let vdev_map =
                 self.vdev_builder.create_from(mobile.clone()).await?;
 
-            //update the index
-            for (path, _) in &vdev_map {
-                debug!(
-                    "Inserting index with path {:?} to mobile {:?}",
-                    path, addr
-                );
-                self.vdevice_index.insert(path.clone(), addr.clone());
-            }
-
             //move to next state
             self.mobiles_connected.insert(
                 addr.clone(),
@@ -191,19 +175,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     }
 
     async fn mobile_disconnected(&mut self, addr: Address) -> Result<()> {
-        if let Some(connected_mobile) = self.mobiles_connected.remove(&addr) {
-            if let MobileState::ReadyToStream { virtual_devices } =
-                connected_mobile
-            {
-                //remove the virtual devices
-                for (path, _) in virtual_devices {
-                    info!("Removing index with path {:?}", path);
-                    if self.vdevice_index.remove(&path).is_none() {
-                        error!("Device not found in vdevice index {:?}", path);
-                    }
-                }
-            }
-
+        if let Some(_) = self.mobiles_connected.remove(&addr) {
             debug!(
                 "Mobile: {:?} disconnected and removed from connected devices",
                 addr

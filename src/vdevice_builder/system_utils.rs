@@ -1,47 +1,7 @@
 use crate::error::Result;
 use anyhow::anyhow;
-use log::{error, info};
-use std::io::Write;
-use std::path::Path;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
+use log::error;
 use tokio::process::Command;
-
-//utility function to trigger a plug event
-pub async fn pnp_plug(device: String) -> Result<()> {
-    let uevent_path =
-        Path::new(&format!("/sys/class/video4linux/{}", device)).join("uevent");
-
-    if uevent_path.exists() {
-        let mut file = OpenOptions::new().write(true).open(uevent_path).await?;
-
-        file.write_all(b"add").await?;
-
-        info!("Successfully triggered unplug event.");
-    } else {
-        error!("uevent file does not exist.");
-    }
-
-    Ok(())
-}
-
-pub fn pnp_unplug(device: String) -> Result<()> {
-    let uevent_path =
-        Path::new(&format!("/sys/class/video4linux/{}", device)).join("uevent");
-
-    if uevent_path.exists() {
-        let mut file =
-            std::fs::OpenOptions::new().write(true).open(uevent_path)?;
-
-        file.write_all(b"remove")?;
-
-        info!("Successfully triggered unplug event.");
-    } else {
-        error!("uevent file does not exist.");
-    }
-
-    Ok(())
-}
 
 //utility function to load a kernel module
 pub async fn load_kmodule(

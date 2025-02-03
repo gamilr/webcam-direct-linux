@@ -1,10 +1,12 @@
 use crate::error::Result;
 use anyhow::anyhow;
 use log::{error, info};
-use tokio::task;
 use v4l2loopback::{add_device, delete_device, DeviceConfig};
 
-use super::system_utils::{pnp_plug, pnp_unplug};
+trait WebrtcHandler {
+    async fn start(&self, sdp: String) -> Result<()>;
+    async fn stop(&self) -> Result<()>;
+}
 
 #[derive(Debug, Clone)]
 pub struct VDevice {
@@ -38,22 +40,12 @@ impl VDevice {
             }
         };
 
-        pnp_plug(format!("video{}", device_num)).await?;
-
         Ok(Self { name, device_num })
     }
 }
 
 impl Drop for VDevice {
     fn drop(&mut self) {
-        if let Err(e) =
-            pnp_unplug(format!("video{}", format!("video{}", self.device_num)))
-        {
-            error!(
-                "Failed to trigger unplug event for virtual device {} with error: {:?}",
-                self.name, e
-            );
-        }
         if let Err(e) = delete_device(self.device_num) {
             error!(
                 "Failed to remove virtual device {} with error: {:?}",

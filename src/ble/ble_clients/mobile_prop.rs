@@ -1,9 +1,6 @@
 //! Discover Bluetooth devices and list them.
 use crate::{
-    ble::{
-        ble_cmd_api::{CmdApi},
-        ble_requester::BleRequester,
-    },
+    ble::{ble_cmd_api::CmdApi, ble_requester::BleRequester},
     error::Result,
 };
 use bluer::{Adapter, AdapterEvent, DeviceEvent, DeviceProperty};
