@@ -123,7 +123,7 @@ impl BleServerCommHandler {
 
         //return the data
         self.buffer_map
-            .get_next_data_chunk(addr, max_buffer_len, data)
+            .get_next_data_chunk(&addr, max_buffer_len, &data)
             .ok_or(anyhow!("No data chunk available"))
     }
 
@@ -136,14 +136,14 @@ impl BleServerCommHandler {
         debug!("Command: {:?}", cmd_type);
 
         let Some(buffer) =
-            self.buffer_map.get_complete_buffer(addr.clone(), payload)
+            self.buffer_map.get_complete_buffer(&addr, payload)
         else {
             return Ok(());
         };
 
         match cmd_type {
             CmdApi::MobileDisconnected => {
-                self.buffer_map.remove_mobile(addr.clone());
+                self.buffer_map.remove_mobile(&addr);
                 comm_handler.mobile_disconnected(addr).await
             }
             CmdApi::RegisterMobile => {
@@ -218,7 +218,7 @@ impl BleServerCommHandler {
         //add the mobile to the buffer map if it does not exist
         //this will indeicate current connection
         if !self.buffer_map.contains_mobile(&addr) {
-            self.buffer_map.add_mobile(addr.clone());
+            self.buffer_map.add_mobile(&addr);
         }
 
         match comm_api {
