@@ -90,6 +90,7 @@ impl BleServer {
     }
 }
 
+//Handle the communication
 struct BleServerCommHandler {
     buffer_map: MobileBufferMap,
     pubsub_topics_map: HashMap<PubSubTopic, BlePublisher>,
@@ -209,12 +210,6 @@ impl BleServerCommHandler {
     ) {
         //destructure the request
         let BleComm { addr, comm_api } = comm;
-
-        //add the mobile to the buffer map if it does not exist
-        //this will indeicate current connection
-        if !self.buffer_map.contains_mobile(&addr) {
-            self.buffer_map.add_mobile(&addr);
-        }
 
         match comm_api {
             BleApi::Query(req, resp) => {
