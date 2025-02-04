@@ -2,7 +2,7 @@ use crate::app_data::{MobileId, MobileSchema};
 use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
-use log::{debug, error, info, trace};
+use log::{debug, info, trace};
 
 use anyhow::anyhow;
 

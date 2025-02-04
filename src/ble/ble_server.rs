@@ -108,12 +108,10 @@ impl BleServerCommHandler {
         &mut self, comm_handler: &mut impl MultiMobileCommService,
         addr: Address, query: QueryReq,
     ) -> Result<DataChunk> {
-        let QueryReq { query_type, max_buffer_len } = query;
-
-        debug!("Query: {:?}", query_type);
+        debug!("Query: {:?}", query.query_type);
 
         //get the data requested
-        let data = match query_type {
+        let data = match query.query_type {
             QueryApi::HostInfo => {
                 let host_info =
                     comm_handler.get_host_info(addr.clone()).await?;
@@ -123,7 +121,7 @@ impl BleServerCommHandler {
 
         //return the data
         self.buffer_map
-            .get_next_data_chunk(&addr, max_buffer_len, &data)
+            .get_next_data_chunk(&addr, &query, &data)
             .ok_or(anyhow!("No data chunk available"))
     }
 
@@ -131,17 +129,14 @@ impl BleServerCommHandler {
         &mut self, comm_handler: &mut impl MultiMobileCommService,
         addr: Address, cmd: CommandReq,
     ) -> Result<()> {
-        let CommandReq { cmd_type, payload } = cmd;
+        debug!("Command: {:?}", cmd.cmd_type);
 
-        debug!("Command: {:?}", cmd_type);
-
-        let Some(buffer) =
-            self.buffer_map.get_complete_buffer(&addr, payload)
+        let Some(buffer) = self.buffer_map.get_complete_buffer(&addr, &cmd)
         else {
             return Ok(());
         };
 
-        match cmd_type {
+        match cmd.cmd_type {
             CmdApi::MobileDisconnected => {
                 self.buffer_map.remove_mobile(&addr);
                 comm_handler.mobile_disconnected(addr).await

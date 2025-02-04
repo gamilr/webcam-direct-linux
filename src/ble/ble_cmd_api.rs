@@ -90,7 +90,7 @@ pub struct BleComm {
 }
 
 /// Enum representing different BLE command APIs.
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum CmdApi {
     /// Mobile disconnected status.
     MobileDisconnected,
@@ -103,7 +103,7 @@ pub enum CmdApi {
 }
 
 /// Enum representing different BLE query APIs.
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum QueryApi {
     /// Query to read host information.
     HostInfo,
