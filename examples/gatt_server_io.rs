@@ -14,7 +14,7 @@ use bluer::{
 };
 use futures::{future, pin_mut, StreamExt};
 use log::info;
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     time::{interval, sleep},

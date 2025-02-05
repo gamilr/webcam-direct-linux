@@ -1,7 +1,10 @@
+use std::path::Path;
+use tokio::io::{AsyncBufReadExt, BufReader};
+
 use crate::error::Result;
 use anyhow::anyhow;
 use log::error;
-use tokio::process::Command;
+use tokio::{fs::File, process::Command};
 
 //utility function to load a kernel module
 pub async fn load_kmodule(
@@ -42,4 +45,24 @@ pub fn unload_kmodule(module_name: &str) -> Result<()> {
         error!("Failed to unload module: {}", module_name);
         Err(anyhow!("Failed to unload module"))
     }
+}
+
+//utility function to check if a kernel module is loaded
+pub async fn is_kmodule_loaded<P>(
+    reg_module_file: P, module_name: &str,
+) -> Result<bool>
+where
+    P: AsRef<Path>,
+{
+    let file = File::open(&reg_module_file).await?;
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        if line.starts_with(module_name) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
