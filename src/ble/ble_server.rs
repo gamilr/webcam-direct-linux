@@ -44,8 +44,6 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, mobile_id: MobileId,
     ) -> Result<()>;
 
-    async fn subscribe_to_sdp_req(&mut self, addr: String) -> Result<()>;
-
     async fn set_mobile_sdp_resp(
         &mut self, addr: String, sdp: String,
     ) -> Result<()>;
@@ -99,7 +97,7 @@ struct BleServerCommHandler {
 impl BleServerCommHandler {
     pub fn new() -> Self {
         Self {
-            buffer_map: MobileBufferMap::new(),
+            buffer_map: MobileBufferMap::new(5000),
             pubsub_topics_map: HashMap::new(),
         }
     }
@@ -121,9 +119,7 @@ impl BleServerCommHandler {
         };
 
         //return the data
-        self.buffer_map
-            .get_next_data_chunk(&addr, &query, &data)
-            .ok_or(anyhow!("No data chunk available"))
+        Ok(self.buffer_map.get_next_data_chunk(&addr, &query, &data))
     }
 
     async fn handle_command(
@@ -156,30 +152,18 @@ impl BleServerCommHandler {
     }
 
     async fn handle_sub(
-        &mut self, comm_handler: &mut impl MultiMobileCommService,
-        addr: Address, sub: SubReq,
+        &mut self, _comm_handler: &mut impl MultiMobileCommService,
+        _addr: Address, sub: SubReq,
     ) -> Result<PubSubSubscriber> {
         let SubReq { topic, max_buffer_len } = sub;
 
-        //create the topic if it does not exist
-        if !self.pubsub_topics_map.contains_key(&topic) {
-            self.pubsub_topics_map
-                .insert(topic.clone(), BlePublisher::new(max_buffer_len));
-        }
+        let publisher = self
+            .pubsub_topics_map
+            .entry(topic)
+            .or_insert(BlePublisher::new(max_buffer_len));
 
-        //process the subscription
-        match topic {
-            PubSubTopic::SdpCall => {
-                comm_handler.subscribe_to_sdp_req(addr).await?
-            }
-        };
-
-        //return the subscriber
-        let Some(publisher) = self.pubsub_topics_map.get(&topic) else {
-            return Err(anyhow!("PubSub topic not found"));
-        };
-
-        return Ok(publisher.get_subscriber().await);
+        //get the subscriber for this topic
+        Ok(publisher.get_subscriber().await)
     }
 
     async fn handle_pub(

@@ -51,27 +51,14 @@ pub type VDeviceMap = HashMap<PathBuf, VDevice>;
 pub trait VDeviceBuilderOps: Send + Sync + 'static {
     async fn create_from(&self, mobile: MobileSchema) -> Result<VDeviceMap>;
 }
-//States:
-//Provisioning:  ReadHostInfo->WriteMobileInfo
-//Identification: WriteMobileId->ReadyToStream
-//
-#[derive(Debug)]
-enum MobileState {
-    ReadHostInfo,
-
-    WriteMobileInfo,
-
-    WriteMobileId { mobile: MobileSchema },
-
-    ReadyToStream { virtual_devices: VDeviceMap },
-}
 
 //caller to send SDP data as a publisher
 //to all mobiles subscribed
-
 pub struct MobileComm<Db, VDevBuilder> {
     db: Db,
-    mobiles_connected: HashMap<Address, MobileState>,
+
+    //virtual devices
+    mobiles_connected: HashMap<Address, VDeviceMap>,
 
     //virtual device builder
     vdev_builder: VDevBuilder,
@@ -85,7 +72,6 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
     }
 }
 
-//TODO: split the data chunk handling and the Mobile state machine logic
 #[async_trait]
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
@@ -94,12 +80,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         trace!("Host info requested by: {:?}", addr);
 
         //get the host info
-        let host_info = self.db.get_host_prov_info()?; //this should be cached
-
-        //update the state first state
-        self.mobiles_connected.insert(addr.clone(), MobileState::ReadHostInfo);
-
-        Ok(host_info)
+        self.db.get_host_prov_info()
     }
 
     async fn register_mobile(
@@ -107,22 +88,8 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     ) -> Result<()> {
         trace!("Registering mobile: {:?}", addr);
 
-        //check right state
-        if let Some(MobileState::ReadHostInfo) =
-            self.mobiles_connected.get(&addr)
-        {
-            //add the mobile to the db
-            self.db.add_mobile(&mobile)?;
-
-            //move to next state
-            self.mobiles_connected
-                .insert(addr.clone(), MobileState::WriteMobileInfo);
-        }
-
-        Err(anyhow!(
-            "Mobile {:?} cannot be registered without reading host info first",
-            addr
-        ))
+        //add the mobile to the db
+        self.db.add_mobile(&mobile)
     }
 
     async fn set_mobile_pnp_id(
@@ -132,45 +99,17 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
 
         let mobile = self.db.get_mobile(&mobile_id)?;
 
-        //move to next state
+        //create the virtual device
         self.mobiles_connected
-            .insert(addr.clone(), MobileState::WriteMobileId { mobile });
+            .insert(addr.clone(), self.vdev_builder.create_from(mobile).await?);
 
         Ok(())
-    }
-
-    async fn subscribe_to_sdp_req(&mut self, addr: Address) -> Result<()> {
-        info!("Subscribe to SDP call: {:?}", addr);
-
-        if let Some(MobileState::WriteMobileId { mobile }) =
-            self.mobiles_connected.get(&addr)
-        {
-            //get the virtual device
-            let vdev_map =
-                self.vdev_builder.create_from(mobile.clone()).await?;
-
-            //move to next state
-            self.mobiles_connected.insert(
-                addr.clone(),
-                MobileState::ReadyToStream { virtual_devices: vdev_map },
-            );
-
-            //update the max buffer len
-            return Ok(());
-        }
-
-        Err(anyhow!("Mobile not found in connected devices"))
     }
 
     async fn set_mobile_sdp_resp(
         &mut self, addr: String, sdp: String,
     ) -> Result<()> {
-        if let Some(MobileState::ReadyToStream { virtual_devices }) =
-            self.mobiles_connected.get(&addr)
-        {
-            info!("current_buffer {:?}", virtual_devices);
-            //TODO: send the sdp data to the virtual devices
-        }
+        trace!("Mobile SDP response: {:?}", addr);
         Ok(())
     }
 
