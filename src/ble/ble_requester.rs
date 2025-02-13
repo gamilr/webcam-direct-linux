@@ -65,6 +65,7 @@ impl BleRequester {
         rx.await?.map(|subscriber| BleSubscriber::new(subscriber))
     }
 
+    #[allow(dead_code)]
     pub async fn publish(
         &self, addr: String, topic: PubSubTopic, data: Vec<u8>,
     ) -> Result<()> {
@@ -80,6 +81,7 @@ impl BleRequester {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct BlePublisher {
     publisher_tx: PubSubPublisher,
     max_buffer_len: usize,

@@ -1,17 +1,13 @@
-use crate::error::Result;
+use crate::{ble::ble_requester::BlePublisher, error::Result};
 use anyhow::anyhow;
 use log::{error, info};
 use v4l2loopback::{add_device, delete_device, DeviceConfig};
-
-trait WebrtcHandler {
-    async fn start(&self, sdp: String) -> Result<()>;
-    async fn stop(&self) -> Result<()>;
-}
 
 #[derive(Debug, Clone)]
 pub struct VDevice {
     pub name: String,
     pub device_num: u32,
+    pub caller: Option<BlePublisher>,
 }
 
 impl VDevice {
@@ -40,7 +36,11 @@ impl VDevice {
             }
         };
 
-        Ok(Self { name, device_num })
+        Ok(Self { name, device_num, caller: None })
+    }
+
+    pub fn set_caller(&mut self, caller: BlePublisher) {
+        self.caller = Some(caller);
     }
 }
 

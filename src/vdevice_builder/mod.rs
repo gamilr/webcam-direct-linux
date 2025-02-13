@@ -1,4 +1,5 @@
 use crate::app_data::MobileSchema;
+use crate::ble::mobile_sdp_types::CameraSdp;
 use crate::ble::{VDeviceBuilderOps, VDeviceMap};
 use crate::error::Result;
 use async_trait::async_trait;
@@ -40,12 +41,15 @@ impl VDeviceBuilder {
 
 #[async_trait]
 impl VDeviceBuilderOps for VDeviceBuilder {
-    async fn create_from(&self, mobile: MobileSchema) -> Result<VDeviceMap> {
+    async fn create_from(
+        &self, mobile_name: String, camera_offer: Vec<CameraSdp>,
+    ) -> Result<VDeviceMap> {
         let mut device_map = VDeviceMap::new();
 
-        for camera in &mobile.cameras {
+        for offer in &camera_offer {
             if let Ok(vdevice) =
-                VDevice::new(format!("{}-{}", &mobile.name, &camera.name)).await
+                VDevice::new(format!("{}-{}", &mobile_name, &offer.camera.name))
+                    .await
             {
                 let path =
                     PathBuf::from(format!("/dev/video{}", vdevice.device_num));

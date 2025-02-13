@@ -9,26 +9,11 @@ use super::kv_db::SchemaType;
 /// Type alias for Mobile ID, represented as a String.
 pub type MobileId = String;
 
-/// Represents the properties of a video, including resolution and frames per second.
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct VideoProp {
-    resolution: (u32, u32),
-    fps: u32,
-}
-
-/// Represents information about a camera, including its name and supported video formats.
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct CameraInfo {
-    pub name: String,
-    pub format: Vec<VideoProp>,
-}
-
 /// Represents the schema for mobile devices, including ID, name, and associated cameras.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct MobileSchema {
     pub id: MobileId,
     pub name: String,
-    pub cameras: Vec<CameraInfo>,
 }
 
 impl SchemaType for MobileSchema {

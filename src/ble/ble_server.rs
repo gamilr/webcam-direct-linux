@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
+use super::mobile_sdp_types::MobileSdpOffer;
 use crate::app_data::{MobileId, MobileSchema};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
@@ -32,21 +33,26 @@ pub struct HostProvInfo {
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub trait MultiMobileCommService: Send + Sync + 'static {
+    //provisioning
     async fn register_mobile(
         &mut self, addr: String, mobile: MobileSchema,
     ) -> Result<()>;
 
     async fn get_host_info(&mut self, addr: String) -> Result<HostProvInfo>;
 
+    //call establishment
+    async fn set_mobile_sdp_offer(
+        &mut self, addr: String, mobile_offer: MobileSdpOffer,
+    ) -> Result<()>;
+
+    async fn sub_to_ready_answer(
+        &mut self, addr: String, publisher: BlePublisher,
+    ) -> Result<()>;
+
+    async fn get_sdp_answer(&mut self, addr: String) -> Result<String>;
+
+    //disconnected device
     async fn mobile_disconnected(&mut self, addr: String) -> Result<()>;
-
-    async fn set_mobile_pnp_id(
-        &mut self, addr: String, mobile_id: MobileId,
-    ) -> Result<()>;
-
-    async fn set_mobile_sdp_resp(
-        &mut self, addr: String, sdp: String,
-    ) -> Result<()>;
 }
 
 pub struct BleServer {
@@ -116,6 +122,12 @@ impl BleServerCommHandler {
                     comm_handler.get_host_info(addr.clone()).await?;
                 serde_json::to_string(&host_info)?
             }
+
+            QueryApi::SdpAnswer => {
+                let sdp_offer =
+                    comm_handler.get_sdp_answer(addr.clone()).await?;
+                serde_json::to_string(&sdp_offer)?
+            }
         };
 
         //return the data
@@ -142,18 +154,16 @@ impl BleServerCommHandler {
                 let mobile = serde_json::from_str(&buffer)?;
                 comm_handler.register_mobile(addr, mobile).await
             }
-            CmdApi::MobilePnpId => {
-                comm_handler.set_mobile_pnp_id(addr, buffer).await
-            }
-            CmdApi::MobileSdpResponse => {
-                comm_handler.set_mobile_sdp_resp(addr, buffer).await
+            CmdApi::SdpOffer => {
+                let mobile_offer = serde_json::from_str(&buffer)?;
+                comm_handler.set_mobile_sdp_offer(addr, mobile_offer).await
             }
         }
     }
 
     async fn handle_sub(
-        &mut self, _comm_handler: &mut impl MultiMobileCommService,
-        _addr: Address, sub: SubReq,
+        &mut self, comm_handler: &mut impl MultiMobileCommService,
+        addr: Address, sub: SubReq,
     ) -> Result<PubSubSubscriber> {
         let SubReq { topic, max_buffer_len } = sub;
 
@@ -162,13 +172,21 @@ impl BleServerCommHandler {
             .entry(topic)
             .or_insert(BlePublisher::new(max_buffer_len));
 
+        match topic {
+            PubSubTopic::SdpAnswerReady => {
+                comm_handler
+                    .sub_to_ready_answer(addr, publisher.clone())
+                    .await?;
+            }
+        };
+
         //get the subscriber for this topic
         Ok(publisher.get_subscriber().await)
     }
 
     async fn handle_pub(
-        &mut self, comm_handler: &mut impl MultiMobileCommService,
-        addr: Address, pub_req: PubReq,
+        &mut self, _comm_handler: &mut impl MultiMobileCommService,
+        _addr: Address, pub_req: PubReq,
     ) -> Result<()> {
         let PubReq { topic, payload } = pub_req;
 
@@ -177,10 +195,7 @@ impl BleServerCommHandler {
         };
 
         match topic {
-            PubSubTopic::SdpCall => {
-                let payload = serde_json::to_string(&payload)?;
-                comm_handler.set_mobile_sdp_resp(addr, payload).await?;
-            }
+            PubSubTopic::SdpAnswerReady => {}
         };
 
         publisher.publish(payload).await

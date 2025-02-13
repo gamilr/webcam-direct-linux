@@ -2,28 +2,21 @@ use crate::app_data::{MobileId, MobileSchema};
 use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
-use log::{debug, info, trace};
+use log::{debug, trace};
 
 use anyhow::anyhow;
 
 use super::{
     ble_cmd_api::Address,
+    ble_requester::BlePublisher,
     ble_server::{HostProvInfo, MultiMobileCommService},
+    mobile_sdp_types::{CameraSdp, MobileSdpOffer},
 };
 use crate::error::Result;
 use crate::vdevice_builder::VDevice;
 
 #[cfg(test)]
 use mockall::automock;
-
-/*
- * This represent the json
- * {
- *  "id": "host_id",
- *  "name": "host_name",
- *  "connection_type": "WLAN"
- * }
- * */
 
 /// A trait that defines the operations for interacting with the application's data store.
 #[cfg_attr(test, automock)]
@@ -49,7 +42,9 @@ pub type VDeviceMap = HashMap<PathBuf, VDevice>;
 
 #[async_trait]
 pub trait VDeviceBuilderOps: Send + Sync + 'static {
-    async fn create_from(&self, mobile: MobileSchema) -> Result<VDeviceMap>;
+    async fn create_from(
+        &self, mobile_name: String, camera_offer: Vec<CameraSdp>,
+    ) -> Result<VDeviceMap>;
 }
 
 //caller to send SDP data as a publisher
@@ -76,6 +71,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
 {
+    //provisioning
     async fn get_host_info(&mut self, addr: Address) -> Result<HostProvInfo> {
         trace!("Host info requested by: {:?}", addr);
 
@@ -92,27 +88,41 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         self.db.add_mobile(&mobile)
     }
 
-    async fn set_mobile_pnp_id(
-        &mut self, addr: Address, mobile_id: MobileId,
+    //call establishment
+    async fn set_mobile_sdp_offer(
+        &mut self, addr: Address, mobile_offer: MobileSdpOffer,
     ) -> Result<()> {
         trace!("Mobile Pnp ID: {:?}", addr);
 
+        let MobileSdpOffer { mobile_id, camera_offer } = mobile_offer;
+
+        //check if the mobile is registered
         let mobile = self.db.get_mobile(&mobile_id)?;
 
         //create the virtual device
-        self.mobiles_connected
-            .insert(addr.clone(), self.vdev_builder.create_from(mobile).await?);
+        self.mobiles_connected.insert(
+            addr.clone(),
+            self.vdev_builder.create_from(mobile.name, camera_offer).await?,
+        );
 
         Ok(())
     }
 
-    async fn set_mobile_sdp_resp(
-        &mut self, addr: String, sdp: String,
+    async fn sub_to_ready_answer(
+        &mut self, addr: Address, publisher: BlePublisher,
     ) -> Result<()> {
-        trace!("Mobile SDP response: {:?}", addr);
+        trace!("Subscribing to SDP call: {:?}", addr);
         Ok(())
     }
 
+    async fn get_sdp_answer(&mut self, addr: Address) -> Result<String> {
+        trace!("SDP offer requested by: {:?}", addr);
+
+        //get the sdp offer
+        Ok("SDP Offer".to_string())
+    }
+
+    //disconnect the mobile device
     async fn mobile_disconnected(&mut self, addr: Address) -> Result<()> {
         if let Some(_) = self.mobiles_connected.remove(&addr) {
             debug!(

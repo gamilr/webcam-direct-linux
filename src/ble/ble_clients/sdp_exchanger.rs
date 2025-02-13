@@ -88,6 +88,7 @@ async fn sdp_exchanger(
                         method: CharacteristicWriteMethod::Io,
                         ..Default::default()
                     }),
+                    
                     notify: Some(CharacteristicNotify {
                         notify: true,
                         method: CharacteristicNotifyMethod::Io,
@@ -166,7 +167,7 @@ async fn sdp_exchanger(
                     Ok(n) => {
                         if let Err(e) = server_conn.cmd(
                             current_device_addr.clone(),
-                            CmdApi::MobilePnpId,
+                            CmdApi::SdpOffer,
                             pnp_read_buf[0..n].to_vec(),
                         ).await {
                             error!("Failed to send mobile pnp id: {:?}", e);
@@ -194,7 +195,7 @@ async fn sdp_exchanger(
 
                         match server_conn.subscribe(
                             notifier.device_address().to_string(),
-                            PubSubTopic::SdpCall,
+                            PubSubTopic::SdpAnswerReady,
                             notifier.mtu(),
                         ).await {
                             Ok(subscriber) => {

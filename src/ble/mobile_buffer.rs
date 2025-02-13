@@ -6,6 +6,9 @@
 //!
 //! The devices can keep multiple channels in parallel, but it cannot interrupt the current
 //! channel until it is complete.
+//!
+//! To support multiple channels in parallel in the same device
+//! and the same api we need to add a transaction id or any other identifier.
 
 use super::ble_cmd_api::{
     Address, CmdApi, CommandReq, DataChunk, QueryApi, QueryReq,
@@ -606,7 +609,7 @@ mod tests {
             }
 
             let cmd = CommandReq {
-                cmd_type: CmdApi::MobilePnpId,
+                cmd_type: CmdApi::SdpOffer,
                 payload: chunk2.clone(),
             };
 

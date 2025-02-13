@@ -96,10 +96,8 @@ pub enum CmdApi {
     MobileDisconnected,
     /// Register mobile command.
     RegisterMobile,
-    /// Mobile PNP ID command.
-    MobilePnpId,
-    /// Mobile SDP response command.
-    MobileSdpResponse,
+    /// Mobile PNP ID command and sdp offer.
+    SdpOffer,
 }
 
 /// Enum representing different BLE query APIs.
@@ -107,11 +105,13 @@ pub enum CmdApi {
 pub enum QueryApi {
     /// Query to read host information.
     HostInfo,
+    ///Query to read sdp offer.
+    SdpAnswer,
 }
 
 /// Enum representing different PubSub topics.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum PubSubTopic {
-    /// SDP call PubSub topic.
-    SdpCall,
+    /// Notify the mobile that the answer is ready for him.
+    SdpAnswerReady,
 }
