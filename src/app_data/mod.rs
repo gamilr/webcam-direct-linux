@@ -90,7 +90,7 @@ where
             host.registered_mobiles.push(mobile.id.clone());
             self.data_db.update("host_info", &host)?;
             // Store the mobile info
-            self.data_db.add(&mobile.id, mobile)?;
+            self.data_db.add::<MobileSchema>(&mobile.id, mobile)?;
             info!("Mobile device added successfully.");
             return Ok(());
         }

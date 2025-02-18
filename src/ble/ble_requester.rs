@@ -28,19 +28,21 @@ impl BleRequester {
 
         self.ble_tx.send(ble_comm).await?;
 
-        if let Ok(data_chunk) = rx.await? {
-            return serde_json::to_vec(&data_chunk)
-                .map_err(|e| anyhow!("Error to serialize data chunk {:?}", e));
+        match rx.await? {
+            Ok(data_chunk) => serde_json::to_vec(&data_chunk)
+                .map_err(|e| anyhow!("Error to serialize data chunk {:?}", e)),
+            Err(e) => Err(anyhow!("Error to get data chunk {:?}", e)),
         }
-
-        Err(anyhow!("Error to get data chunk"))
     }
 
     pub async fn cmd(
         &self, addr: String, cmd_type: CmdApi, data: Vec<u8>,
     ) -> Result<()> {
-        let cmd_req =
-            CommandReq { cmd_type, payload: serde_json::from_slice(&data)? };
+        let cmd_req = if data.is_empty() {
+            CommandReq { cmd_type, payload: DataChunk::default() }
+        } else {
+            CommandReq { cmd_type, payload: serde_json::from_slice(&data)? }
+        };
 
         let (tx, rx) = oneshot::channel();
 
@@ -93,13 +95,14 @@ impl BlePublisher {
         Self { publisher_tx, max_buffer_len }
     }
 
-    pub async fn publish(&self, data: DataChunk) -> Result<()> {
-        let DataChunk { remain_len, buffer } = data;
+    pub async fn publish(&self, buffer: Vec<u8>) -> Result<()> {
+        let mut remain_len = buffer.len();
 
-        for chunk in buffer.as_bytes().chunks(self.max_buffer_len) {
+        for chunk in buffer.chunks(self.max_buffer_len) {
+            remain_len -= chunk.len();
             let data_chunk = DataChunk {
-                remain_len: remain_len - chunk.len(),
-                buffer: String::from_utf8(chunk.to_vec())?,
+                r: remain_len,
+                d: String::from_utf8(chunk.to_owned())?,
             };
 
             self.publisher_tx.send(data_chunk)?;

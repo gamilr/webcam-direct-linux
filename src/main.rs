@@ -2,7 +2,6 @@ mod access_point_ctl;
 mod app_data;
 mod ble;
 mod error;
-mod gatt_const;
 mod vdevice_builder;
 
 use access_point_ctl::{

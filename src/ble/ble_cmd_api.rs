@@ -7,11 +7,12 @@ pub type Responder<T> = oneshot::Sender<T>;
 
 /// Represents a chunk of data with remaining length and buffer.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct DataChunk {
     /// Remaining length of the data.
-    pub remain_len: usize,
+    pub r: usize,
     /// Buffer containing the data.
-    pub buffer: String,
+    pub d: String,
 }
 
 /// Request structure for a query.
@@ -85,6 +86,7 @@ pub type Address = String;
 pub struct BleComm {
     /// Address of the BLE device.
     pub addr: Address,
+
     /// BLE API communication.
     pub comm_api: BleApi,
 }

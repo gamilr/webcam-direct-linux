@@ -11,6 +11,7 @@ pub type MobileId = String;
 
 /// Represents the schema for mobile devices, including ID, name, and associated cameras.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct MobileSchema {
     pub id: MobileId,
     pub name: String,
@@ -33,6 +34,7 @@ pub enum ConnectionType {
 
 /// Represents the schema for host devices, including ID, name, connection type, and registered mobiles.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct HostSchema {
     pub id: HostId,
     pub name: String,

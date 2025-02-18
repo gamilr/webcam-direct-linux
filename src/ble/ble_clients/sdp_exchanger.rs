@@ -1,17 +1,19 @@
-use crate::ble::ble_cmd_api::{CmdApi, PubSubSubscriber, PubSubTopic};
+use super::gatt_const::CHAR_PNP_EXCHANGE_SDP_UUID;
+use crate::ble::ble_cmd_api::{CmdApi, PubSubTopic, QueryApi};
 use crate::ble::ble_requester::{BleRequester, BleSubscriber};
 use crate::error::Result;
-use crate::gatt_const::{SDP_EXCHANGE_CHAR_UUID, WEBCAM_PNP_WRITE_CHAR_UUID};
 use bluer::adv::Advertisement;
 use bluer::gatt::local::{
     characteristic_control, service_control, Application, Characteristic,
     CharacteristicControlEvent, CharacteristicNotify,
-    CharacteristicNotifyMethod, CharacteristicWrite, CharacteristicWriteMethod,
-    Service,
+    CharacteristicNotifyMethod, CharacteristicRead, CharacteristicWrite,
+    CharacteristicWriteMethod, Service,
 };
+
 use bluer::gatt::{CharacteristicReader, CharacteristicWriter};
 use bluer::Adapter;
 use bluer::Uuid;
+use futures::FutureExt;
 use futures::{future, pin_mut, StreamExt};
 use log::{debug, error, info};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -71,44 +73,58 @@ async fn sdp_exchanger(
     info!("Serving GATT service on Bluetooth adapter {}", ble_adapter.name());
 
     let (_service_control, service_handle) = service_control();
-    let (char_webcam_pnp_control, char_webcam_pnp_handle) =
+    let (char_pnp_exchange_control, char_pnp_exchange_handle) =
         characteristic_control();
-    let (char_sdp_exchange_control, char_sdp_exchange_handle) =
-        characteristic_control();
+
+    let reader_server_requester = server_conn.clone();
 
     let app = Application {
         services: vec![Service {
             uuid: host_id,
             primary: true,
-            characteristics: vec![
-                Characteristic {
-                    uuid: SDP_EXCHANGE_CHAR_UUID,
-                    write: Some(CharacteristicWrite {
-                        write: true,
-                        method: CharacteristicWriteMethod::Io,
-                        ..Default::default()
-                    }),
-                    
-                    notify: Some(CharacteristicNotify {
-                        notify: true,
-                        method: CharacteristicNotifyMethod::Io,
-                        ..Default::default()
-                    }),
-                    control_handle: char_sdp_exchange_handle,
+            characteristics: vec![Characteristic {
+                uuid: CHAR_PNP_EXCHANGE_SDP_UUID,
+                write: Some(CharacteristicWrite {
+                    write: true,
+                    method: CharacteristicWriteMethod::Io,
                     ..Default::default()
-                },
-                Characteristic {
-                    uuid: WEBCAM_PNP_WRITE_CHAR_UUID,
-                    write: Some(CharacteristicWrite {
-                        write: true,
-                        write_without_response: false,
-                        method: CharacteristicWriteMethod::Io,
-                        ..Default::default()
-                    }),
-                    control_handle: char_webcam_pnp_handle,
+                }),
+                notify: Some(CharacteristicNotify {
+                    notify: true,
+                    method: CharacteristicNotifyMethod::Io,
                     ..Default::default()
-                },
-            ],
+                }),
+                read: Some(CharacteristicRead {
+                    read: true,
+                    fun: Box::new(move |req| {
+                        let reader_server_requester =
+                            reader_server_requester.clone();
+                        async move {
+                            match reader_server_requester
+                                .query(
+                                    req.device_address.to_string(),
+                                    QueryApi::SdpAnswer,
+                                    req.mtu as usize,
+                                )
+                                .await
+                            {
+                                Ok(data) => {
+                                    return Ok(data);
+                                }
+                                Err(e) => {
+                                    error!("Error reading sdp answer, {:?}", e);
+                                }
+                            }
+
+                            Ok(vec![])
+                        }
+                        .boxed()
+                    }),
+                    ..Default::default()
+                }),
+                control_handle: char_pnp_exchange_handle,
+                ..Default::default()
+            }],
             control_handle: service_handle,
             ..Default::default()
         }],
@@ -128,68 +144,21 @@ async fn sdp_exchanger(
     let mut notifier_opt: Option<CharacteristicWriter> = None;
     let mut sub_recv_opt: Option<BleSubscriber> = None;
 
-    let mut sdp_read_buf = Vec::new();
-    let mut sdp_reader_opt: Option<CharacteristicReader> = None;
-
-    pin_mut!(char_webcam_pnp_control);
-    pin_mut!(char_sdp_exchange_control);
+    pin_mut!(char_pnp_exchange_control);
 
     loop {
         tokio::select! {
-            //webcam pnp id write event
-            evt = char_webcam_pnp_control.next() => {
+            evt = char_pnp_exchange_control.next() => {
                 match evt {
+                    //write sdp offer
                     Some(CharacteristicControlEvent::Write(req)) => {
                         info!("Accepting write event for pnp with MTU {} from {}", req.mtu(), req.device_address());
                         pnp_read_buf = vec![0; req.mtu()];
                         current_device_addr = req.device_address().to_string();
                         pnp_reader_opt = Some(req.accept()?);
                     },
-                    _ => {
-                        error!("Error accepting write event");
-                    },
-                }
 
-
-            }
-
-            _ = async {
-                let read_res = match &mut pnp_reader_opt {
-                    Some(reader) => reader.read(&mut pnp_read_buf).await,
-                    None => future::pending().await,
-                };
-
-                match read_res {
-                    Ok(0) => {
-                        info!("Write stream ended");
-                        pnp_reader_opt = None;
-                    }
-                    Ok(n) => {
-                        if let Err(e) = server_conn.cmd(
-                            current_device_addr.clone(),
-                            CmdApi::SdpOffer,
-                            pnp_read_buf[0..n].to_vec(),
-                        ).await {
-                            error!("Failed to send mobile pnp id: {:?}", e);
-                        }
-                    }
-                    Err(err) => {
-                        info!("Write stream error: {}", &err);
-                        pnp_reader_opt = None;
-                    }
-                }
-            } => {}
-
-            //sdp exchange write event
-            evt = char_sdp_exchange_control.next() => {
-                match evt {
-                    Some(CharacteristicControlEvent::Write(req)) => {
-                        info!("Accepting write event for SDP Exchanger with MTU {} from {}", req.mtu(), req.device_address());
-                        sdp_read_buf = vec![0; req.mtu()];
-                        current_device_addr = req.device_address().to_string();
-                        sdp_reader_opt = Some(req.accept()?);
-                    },
-
+                    //notify sdp answer
                     Some(CharacteristicControlEvent::Notify(notifier)) => {
                         info!("Accepting notify request event with MTU {} from {}", notifier.mtu(), notifier.device_address());
 
@@ -219,35 +188,40 @@ async fn sdp_exchanger(
             }
 
             _ = async {
-                let read_res = match &mut sdp_reader_opt {
-                    Some(reader) => reader.read(&mut sdp_read_buf).await,
+                let read_res = match &mut pnp_reader_opt {
+                    Some(reader) => reader.read(&mut pnp_read_buf).await,
                     None => future::pending().await,
                 };
 
                 match read_res {
                     Ok(0) => {
                         info!("Write stream ended");
-                        sdp_reader_opt = None;
+                        pnp_reader_opt = None;
                     }
                     Ok(n) => {
-                        //todo
-                        info!("Received SDP data: {:?}", &sdp_read_buf[0..n]);
+                        if let Err(e) = server_conn.cmd(
+                            current_device_addr.clone(),
+                            CmdApi::SdpOffer,
+                            pnp_read_buf[0..n].to_vec(),
+                        ).await {
+                            error!("Failed to send mobile pnp id: {:?}", e);
+                        }
                     }
                     Err(err) => {
                         info!("Write stream error: {}", &err);
-                        sdp_reader_opt = None;
+                        pnp_reader_opt = None;
                     }
                 }
-            } => {
-            }
+            } => {}
+
             //receive data from server
             _ = async {
-                let pub_data = match &mut sub_recv_opt {
+                let sub_data = match &mut sub_recv_opt {
                     Some(pub_recv) => pub_recv.get_data().await,
                     None => future::pending().await,
                 };
 
-                match pub_data {
+                match sub_data {
                     Ok(data) => {
                         info!("Received data from server: {:?}", data);
 

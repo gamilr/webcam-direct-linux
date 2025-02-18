@@ -28,6 +28,8 @@ pub struct MobileBufferMap {
     /// A map storing the buffer status for each mobile address.
     mobile_buffer_status: HashMap<Address, BufferCursor>,
 
+    transaction_buffer_status: HashMap<Address, HashMap<usize, BufferCursor>>,
+
     /// Buffer size limit for each mobile device in bytes
     /// hard coded to 5000 bytes
     buffer_size_limit: usize,
@@ -47,6 +49,7 @@ impl MobileBufferMap {
     pub fn new(buffer_max_len: usize) -> Self {
         Self {
             mobile_buffer_status: HashMap::new(),
+            transaction_buffer_status: HashMap::new(),
             buffer_size_limit: buffer_max_len,
         }
     }
@@ -116,6 +119,17 @@ impl MobileBufferMap {
         }
     }
 
+    /// Retrieves the buffer cursor for a mobile device.
+    /// If the device does not exist, it initializes the buffer cursor.
+    /// # Arguments
+    /// * `addr` - The address of the mobile device.
+    /// # returns
+    /// A mutable reference to the buffer cursor.
+    /// # Examples
+    /// ```
+    /// let cursor = buffer_map.get_cursors("00:11:22:33:44:55");
+    /// ```
+    ///
     fn get_cursors(&mut self, addr: &str) -> &mut BufferCursor {
         self.mobile_buffer_status
             .entry(addr.to_string())
@@ -165,11 +179,11 @@ impl MobileBufferMap {
         }
 
         let data_chunk = DataChunk {
-            remain_len: *remain_len,
-            buffer: data[chunk_start..chunk_end].to_owned(),
+            r: *remain_len,
+            d: data[chunk_start..chunk_end].to_owned(),
         };
 
-        if data_chunk.remain_len == 0 || *max_buffer_len > max_buffer_size {
+        if data_chunk.r == 0 || *max_buffer_len > max_buffer_size {
             if *max_buffer_len > max_buffer_size {
                 warn!(
                     "Max buffer limit reached for mobile with addr: {}",
@@ -224,15 +238,15 @@ impl MobileBufferMap {
         let curr_buffer = writer.entry(cmd_type.clone()).or_default();
 
         //check if the buffer limit is reached
-        if curr_buffer.len() + payload.buffer.len() > max_buffer_size {
+        if curr_buffer.len() + payload.d.len() > max_buffer_size {
             error!("Buffer limit reached for mobile with addr: {}", addr);
             writer.remove(cmd_type); //remove the writer channel when done
             return None;
         }
 
-        curr_buffer.push_str(&payload.buffer);
+        curr_buffer.push_str(&payload.d);
 
-        if payload.remain_len == 0 {
+        if payload.r == 0 {
             // Finalize and reset to idle state
             let buffer = curr_buffer.to_owned();
             writer.remove(cmd_type); //remove the writer channel when done
@@ -293,8 +307,8 @@ mod tests {
 
         let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
 
-        assert_eq!(chunk.remain_len, 0);
-        assert_eq!(chunk.buffer.len(), 100);
+        assert_eq!(chunk.r, 0);
+        assert_eq!(chunk.d.len(), 100);
     }
 
     #[test]
@@ -309,8 +323,8 @@ mod tests {
 
         let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
 
-        assert_eq!(chunk.remain_len, 0);
-        assert_eq!(chunk.buffer.len(), 100);
+        assert_eq!(chunk.r, 0);
+        assert_eq!(chunk.d.len(), 100);
     }
 
     #[test]
@@ -327,23 +341,23 @@ mod tests {
         loop {
             let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
             chunks.push(chunk.clone());
-            if chunk.remain_len == 0 {
+            if chunk.r == 0 {
                 break;
             }
         }
 
         //test partial chunks
         assert_eq!(chunks.len(), 5);
-        assert_eq!(chunks[0].buffer.len(), 1024); //5000 - 1024 = 3976
-        assert_eq!(chunks[0].remain_len, 3976);
-        assert_eq!(chunks[1].buffer.len(), 1024); // 3976 - 1024 = 2952
-        assert_eq!(chunks[1].remain_len, 2952);
-        assert_eq!(chunks[2].buffer.len(), 1024); // 2952 - 1024 = 1928
-        assert_eq!(chunks[2].remain_len, 1928);
-        assert_eq!(chunks[3].buffer.len(), 1024); // 1928 - 1024 = 904
-        assert_eq!(chunks[3].remain_len, 904);
-        assert_eq!(chunks[4].buffer.len(), 904); // 904 - 904 = 0
-        assert_eq!(chunks[4].remain_len, 0);
+        assert_eq!(chunks[0].d.len(), 1024); //5000 - 1024 = 3976
+        assert_eq!(chunks[0].r, 3976);
+        assert_eq!(chunks[1].d.len(), 1024); // 3976 - 1024 = 2952
+        assert_eq!(chunks[1].r, 2952);
+        assert_eq!(chunks[2].d.len(), 1024); // 2952 - 1024 = 1928
+        assert_eq!(chunks[2].r, 1928);
+        assert_eq!(chunks[3].d.len(), 1024); // 1928 - 1024 = 904
+        assert_eq!(chunks[3].r, 904);
+        assert_eq!(chunks[4].d.len(), 904); // 904 - 904 = 0
+        assert_eq!(chunks[4].r, 0);
     }
 
     #[test]
@@ -362,14 +376,14 @@ mod tests {
             let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
             chunks.push(chunk.clone());
             debug!("Chunk: {:?}", chunk);
-            if chunk.remain_len == 0 {
+            if chunk.r == 0 {
                 break;
             }
             max_buffer_len *= 2;
             query.max_buffer_len = max_buffer_len;
         }
         debug!("Chunks: {:?}", chunks.len());
-        assert!(chunks[chunks.len() - 1].remain_len == 0);
+        assert!(chunks[chunks.len() - 1].r == 0);
     }
 
     #[test]
@@ -386,17 +400,17 @@ mod tests {
         loop {
             let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
             chunks.push(chunk.clone());
-            if chunk.remain_len == 0 {
+            if chunk.r == 0 {
                 break;
             }
         }
 
         //test partial chunks
         assert_eq!(chunks.len(), 20);
-        assert_eq!(chunks[0].buffer.len(), 15); //300 - 15 = 285
-        assert_eq!(chunks[0].remain_len, 285);
-        assert_eq!(chunks[19].buffer.len(), 15);
-        assert_eq!(chunks[19].remain_len, 0);
+        assert_eq!(chunks[0].d.len(), 15); //300 - 15 = 285
+        assert_eq!(chunks[0].r, 285);
+        assert_eq!(chunks[19].d.len(), 15);
+        assert_eq!(chunks[19].r, 0);
 
         //start again
         let new_query =
@@ -404,17 +418,17 @@ mod tests {
         loop {
             let chunk = buffer_map.get_next_data_chunk(addr, &new_query, &data);
             chunks.push(chunk.clone());
-            if chunk.remain_len == 0 {
+            if chunk.r == 0 {
                 break;
             }
         }
 
         //test partial chunks
         assert_eq!(chunks.len(), 44);
-        assert_eq!(chunks[20].buffer.len(), 13); //300 - 13 = 287
-        assert_eq!(chunks[20].remain_len, 287);
-        assert_eq!(chunks[43].buffer.len(), 1);
-        assert_eq!(chunks[43].remain_len, 0);
+        assert_eq!(chunks[20].d.len(), 13); //300 - 13 = 287
+        assert_eq!(chunks[20].r, 287);
+        assert_eq!(chunks[43].d.len(), 1);
+        assert_eq!(chunks[43].r, 0);
     }
 
     #[test]
@@ -428,7 +442,7 @@ mod tests {
             QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 100 };
 
         let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
-        assert_eq!(chunk.remain_len, 0);
+        assert_eq!(chunk.r, 0);
 
         let cmd =
             CommandReq { cmd_type: CmdApi::MobileDisconnected, payload: chunk };
@@ -451,7 +465,7 @@ mod tests {
         loop {
             let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
             chunks.push(chunk.clone());
-            if chunk.remain_len == 0 {
+            if chunk.r == 0 {
                 break;
             }
         }
@@ -492,7 +506,7 @@ mod tests {
         loop {
             let chunk = buffer_map.get_next_data_chunk(addr1, &query1, &data1);
             chunks1.push(chunk.clone());
-            if chunk.remain_len == 0 {
+            if chunk.r == 0 {
                 break;
             }
         }
@@ -500,7 +514,7 @@ mod tests {
         loop {
             let chunk = buffer_map.get_next_data_chunk(addr2, &query2, &data2);
             chunks2.push(chunk.clone());
-            if chunk.remain_len == 0 {
+            if chunk.r == 0 {
                 break;
             }
         }
@@ -511,11 +525,11 @@ mod tests {
 
         // Check that the data in the chunks is correct
         for chunk in chunks1 {
-            assert_eq!(chunk.buffer, "A".repeat(100));
+            assert_eq!(chunk.d, "A".repeat(100));
         }
 
         for chunk in chunks2 {
-            assert_eq!(chunk.buffer, "B".repeat(100));
+            assert_eq!(chunk.d, "B".repeat(100));
         }
     }
 
@@ -530,12 +544,12 @@ mod tests {
 
         let cmd1 = CommandReq {
             cmd_type: CmdApi::MobileDisconnected,
-            payload: DataChunk { remain_len: 0, buffer: data1.clone() },
+            payload: DataChunk { r: 0, d: data1.clone() },
         };
 
         let cmd2 = CommandReq {
             cmd_type: CmdApi::RegisterMobile,
-            payload: DataChunk { remain_len: 0, buffer: data2.clone() },
+            payload: DataChunk { r: 0, d: data2.clone() },
         };
 
         let mut buffer1 = String::new();
@@ -580,13 +594,13 @@ mod tests {
             let end_chunk = start_chunk + chunk_len;
 
             chunks1.push(DataChunk {
-                remain_len: 500 - end_chunk,
-                buffer: data1[start_chunk..end_chunk].to_string(),
+                r: 500 - end_chunk,
+                d: data1[start_chunk..end_chunk].to_string(),
             });
 
             chunks2.push(DataChunk {
-                remain_len: 500 - end_chunk,
-                buffer: data2[start_chunk..end_chunk].to_string(),
+                r: 500 - end_chunk,
+                d: data2[start_chunk..end_chunk].to_string(),
             });
 
             start_chunk = end_chunk;
@@ -630,7 +644,7 @@ mod tests {
                                       //
         let cmd = CommandReq {
             cmd_type: CmdApi::MobileDisconnected,
-            payload: DataChunk { remain_len: 0, buffer: data.clone() },
+            payload: DataChunk { r: 0, d: data.clone() },
         };
 
         let buffer = buffer_map.get_complete_buffer(addr, &cmd);

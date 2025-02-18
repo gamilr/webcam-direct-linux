@@ -1,21 +1,28 @@
-use crate::{ble::ble_requester::BlePublisher, error::Result};
+use crate::{ble::mobile_sdp_types::CameraSdp, error::Result};
 use anyhow::anyhow;
 use log::{error, info};
+use tokio::task;
 use v4l2loopback::{add_device, delete_device, DeviceConfig};
 
-#[derive(Debug, Clone)]
+use super::webrtc_pipeline::WebrtcPipeline;
+
+#[derive(Debug)]
 pub struct VDevice {
     pub name: String,
     pub device_num: u32,
-    pub caller: Option<BlePublisher>,
+    webrtc_pipeline: WebrtcPipeline,
 }
 
 impl VDevice {
-    pub async fn new(name: String) -> Result<Self> {
+    pub async fn new(name: String, camera_offer: CameraSdp) -> Result<Self> {
+        //get he resolution from the camera offer
+        let res_width = camera_offer.format.resolution.0;
+        let res_height = camera_offer.format.resolution.1;
+
         let config = DeviceConfig {
-            min_width: 100,
+            min_width: res_width,
             max_width: 4000,
-            min_height: 100,
+            min_height: res_height,
             max_height: 4000,
             max_buffers: 9,
             max_openers: 1,
@@ -25,22 +32,39 @@ impl VDevice {
 
         info!("Adding virtual device with name {}", name);
 
-        let device_num = match add_device(None, config)
-            .map_err(|e| anyhow!("Failed to add device: {:?}", e))
-        {
-            Ok(num) => num,
-            Err(e) => {
-                // Handle the error from add_device
-                error!("Error adding device: {:?}", e);
-                return Err(e);
-            }
-        };
+        let name_clone = name.clone();
 
-        Ok(Self { name, device_num, caller: None })
+        //create the device in a blocking task
+        let device_num = task::spawn_blocking(move || {
+            add_device(None, config).map_err(|e| {
+                error!(
+                    "Failed to add virtual device with name {} error {:?}",
+                    name_clone, e
+                );
+                anyhow!(
+                    "Failed to add virtual device with name {} error {:?}",
+                    name_clone,
+                    e
+                )
+            })
+        })
+        .await??;
+
+        //create the pipeline in a blocking task
+        let name_clone = name.clone();
+        let sdp_offer = camera_offer.sdp.clone();
+        let video_prop = camera_offer.format.clone();
+
+        let webrtc_pipeline = task::spawn_blocking(move || {
+            WebrtcPipeline::new(name_clone, sdp_offer, video_prop)
+        })
+        .await??;
+
+        Ok(Self { name, device_num, webrtc_pipeline })
     }
 
-    pub fn set_caller(&mut self, caller: BlePublisher) {
-        self.caller = Some(caller);
+    pub fn get_sdp_answer(&self) -> String {
+        self.webrtc_pipeline.get_sdp_answer()
     }
 }
 

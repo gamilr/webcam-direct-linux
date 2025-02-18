@@ -1,5 +1,5 @@
-use crate::app_data::{MobileId, MobileSchema};
-use std::{collections::HashMap, path::PathBuf};
+use crate::app_data::MobileSchema;
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use log::{debug, trace};
@@ -10,7 +10,7 @@ use super::{
     ble_cmd_api::Address,
     ble_requester::BlePublisher,
     ble_server::{HostProvInfo, MultiMobileCommService},
-    mobile_sdp_types::{CameraSdp, MobileSdpOffer},
+    mobile_sdp_types::{CameraSdp, MobileSdpAnswer, MobileSdpOffer, VideoProp},
 };
 use crate::error::Result;
 use crate::vdevice_builder::VDevice;
@@ -38,7 +38,14 @@ pub trait AppDataStore: Send + Sync + 'static {
     fn get_mobile(&self, id: &str) -> Result<MobileSchema>;
 }
 
-pub type VDeviceMap = HashMap<PathBuf, VDevice>;
+pub type VDeviceMap = HashMap<String, VDevice>;
+
+#[derive(Default)]
+pub struct VDeviceInfo {
+    publisher: Option<BlePublisher>,
+    vdevices: VDeviceMap,
+    sdp_answer_cache: Option<MobileSdpAnswer>,
+}
 
 #[async_trait]
 pub trait VDeviceBuilderOps: Send + Sync + 'static {
@@ -53,17 +60,25 @@ pub struct MobileComm<Db, VDevBuilder> {
     db: Db,
 
     //virtual devices
-    mobiles_connected: HashMap<Address, VDeviceMap>,
+    mobiles_connected: HashMap<Address, VDeviceInfo>,
 
     //virtual device builder
     vdev_builder: VDevBuilder,
+
+    //host cache
+    host_prov_info_cache: Option<HostProvInfo>,
 }
 
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
     MobileComm<Db, VDevBuilder>
 {
     pub fn new(db: Db, vdev_builder: VDevBuilder) -> Result<Self> {
-        Ok(Self { db, mobiles_connected: HashMap::new(), vdev_builder })
+        Ok(Self {
+            db,
+            mobiles_connected: HashMap::new(),
+            vdev_builder,
+            host_prov_info_cache: None,
+        })
     }
 }
 
@@ -72,11 +87,18 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
 {
     //provisioning
-    async fn get_host_info(&mut self, addr: Address) -> Result<HostProvInfo> {
+    async fn get_host_info<'a>(
+        &'a mut self, addr: Address,
+    ) -> Result<&'a HostProvInfo> {
         trace!("Host info requested by: {:?}", addr);
 
+        //check if the host info is already cached
+        if let None = self.host_prov_info_cache {
+            self.host_prov_info_cache = Some(self.db.get_host_prov_info()?);
+        }
+
         //get the host info
-        self.db.get_host_prov_info()
+        Ok(self.host_prov_info_cache.as_ref().unwrap())
     }
 
     async fn register_mobile(
@@ -89,6 +111,25 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     }
 
     //call establishment
+    async fn sub_to_ready_answer(
+        &mut self, addr: Address, publisher: BlePublisher,
+    ) -> Result<()> {
+        trace!("Subscribing to SDP call: {:?}", addr);
+
+        //add the publisher to for this mobile
+        self.mobiles_connected.insert(
+            addr,
+            VDeviceInfo {
+                publisher: Some(publisher),
+                vdevices: HashMap::new(),
+                sdp_answer_cache: None,
+            },
+        );
+
+        Ok(())
+    }
+
+    //set the SDP offer from the mobile
     async fn set_mobile_sdp_offer(
         &mut self, addr: Address, mobile_offer: MobileSdpOffer,
     ) -> Result<()> {
@@ -99,27 +140,53 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         //check if the mobile is registered
         let mobile = self.db.get_mobile(&mobile_id)?;
 
-        //create the virtual device
-        self.mobiles_connected.insert(
-            addr.clone(),
-            self.vdev_builder.create_from(mobile.name, camera_offer).await?,
-        );
+        if let Some(vdevice_info) = self.mobiles_connected.get_mut(&addr) {
+            if let Some(publisher) = &vdevice_info.publisher {
+                //create the virtual devices
+                vdevice_info.vdevices = self
+                    .vdev_builder
+                    .create_from(mobile.name, camera_offer)
+                    .await?;
+
+                //notify the mobile the SDP answer are ready
+                publisher.publish(addr.to_string().into()).await?;
+            } else {
+                return Err(anyhow!("Publisher not found for mobile"));
+            }
+        } else {
+            return Err(anyhow!("Mobile not found in connected devices"));
+        }
 
         Ok(())
     }
 
-    async fn sub_to_ready_answer(
-        &mut self, addr: Address, publisher: BlePublisher,
-    ) -> Result<()> {
-        trace!("Subscribing to SDP call: {:?}", addr);
-        Ok(())
-    }
-
-    async fn get_sdp_answer(&mut self, addr: Address) -> Result<String> {
+    async fn get_sdp_answer<'a>(
+        &'a mut self, addr: Address,
+    ) -> Result<&'a MobileSdpAnswer> {
         trace!("SDP offer requested by: {:?}", addr);
 
-        //get the sdp offer
-        Ok("SDP Offer".to_string())
+        let vdevice_info = self
+            .mobiles_connected
+            .get_mut(&addr)
+            .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?;
+
+        //check if the SDP answer is already cached
+        if let None = vdevice_info.sdp_answer_cache {
+            let sdp_answer = vdevice_info
+                .vdevices
+                .iter()
+                .map(|(name, vdevice)| CameraSdp {
+                    name: name.clone(),
+                    format: VideoProp::default(),
+                    sdp: vdevice.get_sdp_answer().clone(),
+                })
+                .collect::<Vec<CameraSdp>>();
+
+            vdevice_info.sdp_answer_cache =
+                Some(MobileSdpAnswer { camera_answer: sdp_answer });
+        }
+
+        Ok(vdevice_info.sdp_answer_cache.as_ref().unwrap())
     }
 
     //disconnect the mobile device

@@ -1,4 +1,3 @@
-use crate::app_data::MobileSchema;
 use crate::ble::mobile_sdp_types::CameraSdp;
 use crate::ble::{VDeviceBuilderOps, VDeviceMap};
 use crate::error::Result;
@@ -8,6 +7,7 @@ use std::path::PathBuf;
 use system_utils::{load_kmodule, unload_kmodule};
 mod system_utils;
 mod vdevice;
+mod webrtc_pipeline;
 
 pub use vdevice::VDevice;
 
@@ -42,14 +42,15 @@ impl VDeviceBuilder {
 #[async_trait]
 impl VDeviceBuilderOps for VDeviceBuilder {
     async fn create_from(
-        &self, mobile_name: String, camera_offer: Vec<CameraSdp>,
+        &self, mobile_name: String, camera_offer_list: Vec<CameraSdp>,
     ) -> Result<VDeviceMap> {
         let mut device_map = VDeviceMap::new();
 
-        for offer in &camera_offer {
-            if let Ok(vdevice) =
-                VDevice::new(format!("{}-{}", &mobile_name, &offer.camera.name))
-                    .await
+        for camera_offer in camera_offer_list {
+            let vdevice_name =
+                format!("{}-{}", &mobile_name, &camera_offer.name);
+            let camera_name = camera_offer.name.clone();
+            if let Ok(vdevice) = VDevice::new(vdevice_name, camera_offer).await
             {
                 let path =
                     PathBuf::from(format!("/dev/video{}", vdevice.device_num));
@@ -59,7 +60,7 @@ impl VDeviceBuilderOps for VDeviceBuilder {
                     &vdevice.name, &path
                 );
 
-                device_map.insert(path, vdevice);
+                device_map.insert(camera_name, vdevice);
             }
         }
 

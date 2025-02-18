@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use super::mobile_sdp_types::MobileSdpOffer;
-use crate::app_data::{MobileId, MobileSchema};
+use super::mobile_sdp_types::{MobileSdpAnswer, MobileSdpOffer};
+use crate::app_data::MobileSchema;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use log::{debug, error, info, trace};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
@@ -38,7 +38,9 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, mobile: MobileSchema,
     ) -> Result<()>;
 
-    async fn get_host_info(&mut self, addr: String) -> Result<HostProvInfo>;
+    async fn get_host_info<'a>(
+        &'a mut self, addr: String,
+    ) -> Result<&'a HostProvInfo>;
 
     //call establishment
     async fn set_mobile_sdp_offer(
@@ -49,7 +51,9 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, publisher: BlePublisher,
     ) -> Result<()>;
 
-    async fn get_sdp_answer(&mut self, addr: String) -> Result<String>;
+    async fn get_sdp_answer<'a>(
+        &'a mut self, addr: String,
+    ) -> Result<&'a MobileSdpAnswer>;
 
     //disconnected device
     async fn mobile_disconnected(&mut self, addr: String) -> Result<()>;
@@ -198,7 +202,7 @@ impl BleServerCommHandler {
             PubSubTopic::SdpAnswerReady => {}
         };
 
-        publisher.publish(payload).await
+        publisher.publish(payload.d.into()).await
     }
 
     //This function does not return a Result since every request is successful
