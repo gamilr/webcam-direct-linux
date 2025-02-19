@@ -48,20 +48,24 @@ impl VDeviceBuilderOps for VDeviceBuilder {
 
         for camera_offer in camera_offer_list {
             let vdevice_name =
-                format!("{}-{}", &mobile_name, &camera_offer.name);
+                format!("{}: {}", &mobile_name, &camera_offer.name);
             let camera_name = camera_offer.name.clone();
-            if let Ok(vdevice) = VDevice::new(vdevice_name, camera_offer).await
-            {
-                let path =
-                    PathBuf::from(format!("/dev/video{}", vdevice.device_num));
+            let vdevice = match VDevice::new(vdevice_name, camera_offer).await {
+                Ok(vdevice) => vdevice,
+                Err(e) => {
+                    error!("Failed to create virtual device for camera {} error: {:?}", &camera_name, e);
+                    continue;
+                }
+            };
+            let path =
+                PathBuf::from(format!("/dev/video{}", vdevice.device_num));
 
-                info!(
-                    "Created virtual device with name {} in path {:?}",
-                    &vdevice.name, &path
-                );
+            info!(
+                "Created virtual device with name {} in path {:?}",
+                &vdevice.name, &path
+            );
 
-                device_map.insert(camera_name, vdevice);
-            }
+            device_map.insert(camera_name, vdevice);
         }
 
         Ok(device_map)

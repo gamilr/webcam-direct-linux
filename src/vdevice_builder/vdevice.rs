@@ -3,8 +3,17 @@ use anyhow::anyhow;
 use log::{error, info};
 use tokio::task;
 use v4l2loopback::{add_device, delete_device, DeviceConfig};
-
 use super::webrtc_pipeline::WebrtcPipeline;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Sdp {
+    #[serde(rename = "type")]
+    type_: String,
+    sdp: String,
+}
+
+
 
 #[derive(Debug)]
 pub struct VDevice {
@@ -12,6 +21,7 @@ pub struct VDevice {
     pub device_num: u32,
     webrtc_pipeline: WebrtcPipeline,
 }
+
 
 impl VDevice {
     pub async fn new(name: String, camera_offer: CameraSdp) -> Result<Self> {
@@ -51,12 +61,13 @@ impl VDevice {
         .await??;
 
         //create the pipeline in a blocking task
-        let name_clone = name.clone();
-        let sdp_offer = camera_offer.sdp.clone();
+        let device_path = format!("/dev/video{}", device_num);
+        let sdp_offer: Sdp = serde_json::from_str(&camera_offer.sdp)?;
+        //let sdp_offer = camera_offer.sdp.clone();
         let video_prop = camera_offer.format.clone();
 
         let webrtc_pipeline = task::spawn_blocking(move || {
-            WebrtcPipeline::new(name_clone, sdp_offer, video_prop)
+            WebrtcPipeline::new(device_path, sdp_offer.sdp, video_prop)
         })
         .await??;
 

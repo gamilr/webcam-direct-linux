@@ -89,9 +89,8 @@ fn create_pipeline(
 
     //use the max-bundle policy which means that all media streams will be multiplexed into a
     //single transport
-    webrtcbin.set_property("bundle-policy", &"max-bundle");
+    webrtcbin.set_property_from_str("bundle-policy", "max-bundle");
     //gather all ice candidates before creating the answer
-    webrtcbin.set_property("disable-trickle", &true);
 
     let queue = ElementFactory::make("queue").build()?;
 
@@ -119,7 +118,7 @@ fn create_pipeline(
         &rtpvp8depay,
         &vp8dec,
         &videoconvert,
-        &capsfilter,
+        //&capsfilter,
         &v4l2sink,
     ])?;
 
@@ -128,7 +127,7 @@ fn create_pipeline(
         &rtpvp8depay,
         &vp8dec,
         &videoconvert,
-        &capsfilter,
+        //&capsfilter,
         &v4l2sink,
     ])?;
 
@@ -255,6 +254,8 @@ fn create_pipeline(
     /*
         let sdp_offer = "v=0\r\no=- 4611733054762223410 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sendonly\r\na=rtcp-mux\r\na=rtpmap:96 VP8/90000\r\n";
     */
+
+    info!("Received SDP offer:\n{}", sdp_offer);
     let sdp = gst_sdp::SDPMessage::parse_buffer(sdp_offer.as_bytes())?;
 
     let offer = gst_webrtc::WebRTCSessionDescription::new(
@@ -262,7 +263,7 @@ fn create_pipeline(
         sdp,
     );
 
-    webrtcbin.emit_by_name::<()>("set-remote-description", &[&offer]);
+    webrtcbin.emit_by_name::<()>("set-remote-description", &[&offer, &None::<gst::Promise>]);
 
     let webrtcbin_clone = webrtcbin.clone();
     let tx_clone = tx.clone();

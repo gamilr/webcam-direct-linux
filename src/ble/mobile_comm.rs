@@ -2,7 +2,7 @@ use crate::app_data::MobileSchema;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use log::{debug, trace};
+use log::{debug, trace, error};
 
 use anyhow::anyhow;
 
@@ -90,7 +90,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     async fn get_host_info<'a>(
         &'a mut self, addr: Address,
     ) -> Result<&'a HostProvInfo> {
-        trace!("Host info requested by: {:?}", addr);
+        debug!("Host info requested by: {:?}", addr);
 
         //check if the host info is already cached
         if let None = self.host_prov_info_cache {
@@ -104,7 +104,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     async fn register_mobile(
         &mut self, addr: Address, mobile: MobileSchema,
     ) -> Result<()> {
-        trace!("Registering mobile: {:?}", addr);
+        debug!("Registering mobile: {:?}", addr);
 
         //add the mobile to the db
         self.db.add_mobile(&mobile)
@@ -114,7 +114,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     async fn sub_to_ready_answer(
         &mut self, addr: Address, publisher: BlePublisher,
     ) -> Result<()> {
-        trace!("Subscribing to SDP call: {:?}", addr);
+        debug!("Subscribing to SDP call: {:?}", addr);
 
         //add the publisher to for this mobile
         self.mobiles_connected.insert(
@@ -133,7 +133,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     async fn set_mobile_sdp_offer(
         &mut self, addr: Address, mobile_offer: MobileSdpOffer,
     ) -> Result<()> {
-        trace!("Mobile Pnp ID: {:?}", addr);
+        debug!("Mobile Pnp ID: {:?}", addr);
 
         let MobileSdpOffer { mobile_id, camera_offer } = mobile_offer;
 
@@ -163,7 +163,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     async fn get_sdp_answer<'a>(
         &'a mut self, addr: Address,
     ) -> Result<&'a MobileSdpAnswer> {
-        trace!("SDP offer requested by: {:?}", addr);
+        debug!("SDP answer requested by: {:?}", addr);
 
         let vdevice_info = self
             .mobiles_connected
@@ -184,9 +184,14 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
 
             vdevice_info.sdp_answer_cache =
                 Some(MobileSdpAnswer { camera_answer: sdp_answer });
+            debug!("SDP answer cached for mobile: {:?}", addr);
         }
 
-        Ok(vdevice_info.sdp_answer_cache.as_ref().unwrap())
+
+        Ok(vdevice_info.sdp_answer_cache.as_ref().ok_or_else(|| {
+            error!("SDP answer not found in connected devices");
+            anyhow!("SDP answer not found in connected devices")
+        })?)
     }
 
     //disconnect the mobile device
