@@ -4,7 +4,7 @@ use crate::error::Result;
 use async_trait::async_trait;
 use log::{error, info};
 use std::path::PathBuf;
-use system_utils::{load_kmodule, unload_kmodule};
+use system_utils::{load_kmodule, unload_kmodule, update_dir_permissions};
 mod system_utils;
 mod vdevice;
 mod webrtc_pipeline;
@@ -27,6 +27,7 @@ impl VDeviceBuilder {
         if !is_kmodule_loaded("/proc/modules", "videodev").await? {
             is_v4l2loopback_loaded = true;
             load_kmodule("videodev", None).await?;
+            //update_dir_permissions("/dev/v4l2loopback", "o+r").await?;
         }
 
         //check for v4l2loopback module

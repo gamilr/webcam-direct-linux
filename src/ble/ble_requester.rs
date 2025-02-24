@@ -1,5 +1,6 @@
 use crate::error::Result;
 use anyhow::anyhow;
+use log::info;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::ble_cmd_api::{
@@ -29,8 +30,10 @@ impl BleRequester {
         self.ble_tx.send(ble_comm).await?;
 
         match rx.await? {
-            Ok(data_chunk) => serde_json::to_vec(&data_chunk)
-                .map_err(|e| anyhow!("Error to serialize data chunk {:?}", e)),
+            Ok(data_chunk) => {
+                info!("Received data chunk: {:?}", data_chunk);
+                serde_json::to_vec(&data_chunk)
+                .map_err(|e| anyhow!("Error to serialize data chunk {:?}", e))},
             Err(e) => Err(anyhow!("Error to get data chunk {:?}", e)),
         }
     }

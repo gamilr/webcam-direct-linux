@@ -17,9 +17,9 @@ pub async fn load_kmodule(
         None => cmd.arg(module_name),
     };
 
-    let cmd = cmd.status().await?;
+    let status = cmd.status().await?;
 
-    if cmd.success() {
+    if status.success() {
         Ok(())
     } else {
         error!(
@@ -27,6 +27,21 @@ pub async fn load_kmodule(
             module_name
         );
         Err(anyhow!("Failed to load module"))
+    }
+}
+
+pub async fn update_dir_permissions<P>(dir: P, mode: &str) -> Result<()>
+where
+    P: AsRef<Path>,
+{
+    let status =
+        Command::new("chmod").arg(mode).arg(dir.as_ref()).status().await?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        error!("Failed to update directory permissions");
+        Err(anyhow!("Failed to update directory permissions"))
     }
 }
 

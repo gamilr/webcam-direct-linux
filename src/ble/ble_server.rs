@@ -134,6 +134,9 @@ impl BleServerCommHandler {
             }
         };
 
+        info!("Query data: {:?}", data);
+        info!("Query request: {:?}", query);
+
         //return the data
         Ok(self.buffer_map.get_next_data_chunk(&addr, &query, &data))
     }

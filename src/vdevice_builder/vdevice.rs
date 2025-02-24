@@ -1,10 +1,10 @@
+use super::webrtc_pipeline::WebrtcPipeline;
 use crate::{ble::mobile_sdp_types::CameraSdp, error::Result};
 use anyhow::anyhow;
 use log::{error, info};
+use serde::{Deserialize, Serialize};
 use tokio::task;
 use v4l2loopback::{add_device, delete_device, DeviceConfig};
-use super::webrtc_pipeline::WebrtcPipeline;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Sdp {
@@ -13,15 +13,12 @@ struct Sdp {
     sdp: String,
 }
 
-
-
 #[derive(Debug)]
 pub struct VDevice {
     pub name: String,
     pub device_num: u32,
     webrtc_pipeline: WebrtcPipeline,
 }
-
 
 impl VDevice {
     pub async fn new(name: String, camera_offer: CameraSdp) -> Result<Self> {
@@ -30,12 +27,12 @@ impl VDevice {
         let res_height = camera_offer.format.resolution.1;
 
         let config = DeviceConfig {
-            min_width: res_width,
+            min_width: 100,
             max_width: 4000,
-            min_height: res_height,
+            min_height: 100,
             max_height: 4000,
-            max_buffers: 9,
-            max_openers: 1,
+            max_buffers: 2,
+            max_openers: 9,
             label: name.clone(),
             ..Default::default()
         };
@@ -59,6 +56,11 @@ impl VDevice {
             })
         })
         .await??;
+
+        info!(
+            "Virtual device {} added with device number {}",
+            name, device_num
+        );
 
         //create the pipeline in a blocking task
         let device_path = format!("/dev/video{}", device_num);

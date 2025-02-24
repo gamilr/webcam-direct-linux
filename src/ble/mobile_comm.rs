@@ -2,7 +2,7 @@ use crate::app_data::MobileSchema;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use log::{debug, trace, error};
+use log::{debug, error, info, trace};
 
 use anyhow::anyhow;
 
@@ -187,11 +187,14 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
             debug!("SDP answer cached for mobile: {:?}", addr);
         }
 
+        let sdp_answer = vdevice_info
+            .sdp_answer_cache
+            .as_ref()
+            .ok_or_else(|| anyhow!("SDP answer not found in connected devices"))?;
 
-        Ok(vdevice_info.sdp_answer_cache.as_ref().ok_or_else(|| {
-            error!("SDP answer not found in connected devices");
-            anyhow!("SDP answer not found in connected devices")
-        })?)
+        info!("SDP answer {:?} for mobile {:?} is ready", sdp_answer,  addr);
+
+        Ok(sdp_answer)
     }
 
     //disconnect the mobile device

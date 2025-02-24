@@ -99,16 +99,22 @@ async fn sdp_exchanger(
                     fun: Box::new(move |req| {
                         let reader_server_requester =
                             reader_server_requester.clone();
+                        info!(
+                            "Accepting read event for pnp with MTU {} from {}",
+                            req.mtu,
+                            req.device_address.to_string()
+                        );
                         async move {
                             match reader_server_requester
                                 .query(
                                     req.device_address.to_string(),
                                     QueryApi::SdpAnswer,
-                                    req.mtu as usize,
+                                    (req.mtu as usize) - 80,
                                 )
                                 .await
                             {
                                 Ok(data) => {
+                                    info!("data len: {:?}", data.len());
                                     return Ok(data);
                                 }
                                 Err(e) => {

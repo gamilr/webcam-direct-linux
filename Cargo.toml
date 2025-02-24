@@ -13,8 +13,10 @@ bluer = { version = "0.17.3", features = ["full"] }
 directories = "5.0.1"
 env_logger = "0.11.4"
 futures = "0.3.30"
-gstreamer = "0.23.4"
-gstreamer-webrtc = "0.23.4"
+gst = { version = "0.23.5", package = "gstreamer", features = ["v1_24"] }
+gst-sdp = { version = "0.23.5", package = "gstreamer-sdp", features = ["v1_24"] }
+gst-webrtc = { version = "0.23.5", package = "gstreamer-webrtc", features = ["v1_24"] }
+gst-app = { version = "0.23.5", package = "gstreamer-app", features = ["v1_24"] }
 hostname = "0.4.0"
 log = "0.4.22"
 neli = "0.6.4"
