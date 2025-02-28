@@ -5,6 +5,8 @@ use tokio::sync::{broadcast, oneshot};
 /// Type alias for a responder using oneshot channel.
 pub type Responder<T> = oneshot::Sender<T>;
 
+pub const MAX_BUFFER_LEN: usize = 5000; //max buffer length
+
 /// Represents a chunk of data with remaining length and buffer.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -12,6 +14,7 @@ pub struct DataChunk {
     /// Remaining length of the data.
     pub r: usize,
     /// Buffer containing the data.
+    /// leave this as a string and not overprocess it
     pub d: String,
 }
 
@@ -21,7 +24,7 @@ pub struct QueryReq {
     /// Type of the query.
     pub query_type: QueryApi,
     /// Maximum length of the buffer.
-    pub max_buffer_len: usize,
+    pub resp_buffer_len: usize,
 }
 
 /// Type alias for a query response.
@@ -50,7 +53,7 @@ pub struct SubReq {
     /// Topic to subscribe to.
     pub topic: PubSubTopic,
     /// Maximum length of the buffer.
-    pub max_buffer_len: usize,
+    pub resp_buffer_len: usize,
 }
 
 /// Type alias for a subscription response.

@@ -13,7 +13,7 @@
 use super::ble_cmd_api::{
     Address, CmdApi, CommandReq, DataChunk, QueryApi, QueryReq,
 };
-use log::{error, warn};
+use log::{error, info, warn};
 use std::collections::HashMap;
 
 /// Represents the current state of a mobile buffer.
@@ -27,8 +27,6 @@ pub struct BufferCursor {
 pub struct MobileBufferMap {
     /// A map storing the buffer status for each mobile address.
     mobile_buffer_status: HashMap<Address, BufferCursor>,
-
-    transaction_buffer_status: HashMap<Address, HashMap<usize, BufferCursor>>,
 
     /// Buffer size limit for each mobile device in bytes
     /// hard coded to 5000 bytes
@@ -49,7 +47,6 @@ impl MobileBufferMap {
     pub fn new(buffer_max_len: usize) -> Self {
         Self {
             mobile_buffer_status: HashMap::new(),
-            transaction_buffer_status: HashMap::new(),
             buffer_size_limit: buffer_max_len,
         }
     }
@@ -159,7 +156,7 @@ impl MobileBufferMap {
     pub fn get_next_data_chunk(
         &mut self, addr: &str, query: &QueryReq, data: &str,
     ) -> DataChunk {
-        let QueryReq { query_type, max_buffer_len } = query;
+        let QueryReq { query_type, resp_buffer_len } = query;
 
         let max_buffer_size = self.buffer_size_limit;
 
@@ -169,13 +166,13 @@ impl MobileBufferMap {
         let remain_len = reader.entry(query_type.clone()).or_insert(data.len());
 
         let chunk_start = data.len() - *remain_len;
-        let chunk_end = (chunk_start + max_buffer_len).min(data.len());
+        let chunk_end = (chunk_start + resp_buffer_len).min(data.len());
 
         // Update remaining length
         if chunk_end == data.len() {
             *remain_len = 0;
         } else {
-            *remain_len -= *max_buffer_len;
+            *remain_len -= *resp_buffer_len;
         }
 
         let data_chunk = DataChunk {
@@ -183,8 +180,8 @@ impl MobileBufferMap {
             d: data[chunk_start..chunk_end].to_owned(),
         };
 
-        if data_chunk.r == 0 || *max_buffer_len > max_buffer_size {
-            if *max_buffer_len > max_buffer_size {
+        if data_chunk.r == 0 || *resp_buffer_len > max_buffer_size {
+            if *resp_buffer_len > max_buffer_size {
                 warn!(
                     "Max buffer limit reached for mobile with addr: {}",
                     addr
@@ -193,6 +190,8 @@ impl MobileBufferMap {
 
             reader.remove(query_type); //remove the reader channel when done
         }
+
+        info!("DataChunk payload len: {}", data_chunk.d.len());
 
         return data_chunk;
     }
@@ -303,7 +302,7 @@ mod tests {
 
         let data = "A".repeat(100); // Simple data
         let query =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 100 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
 
         let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
 
@@ -319,7 +318,7 @@ mod tests {
 
         let data = "A".repeat(100); // Simple data
         let query =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 100 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
 
         let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
 
@@ -335,7 +334,7 @@ mod tests {
 
         let data = "A".repeat(5000); // Large data
         let query =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 1024 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 1024 };
         let mut chunks = Vec::new();
 
         loop {
@@ -370,8 +369,10 @@ mod tests {
         let mut chunks = Vec::new();
 
         let mut max_buffer_len = 15;
-        let mut query =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len };
+        let mut query = QueryReq {
+            query_type: QueryApi::HostInfo,
+            resp_buffer_len: max_buffer_len,
+        };
         loop {
             let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
             chunks.push(chunk.clone());
@@ -380,7 +381,7 @@ mod tests {
                 break;
             }
             max_buffer_len *= 2;
-            query.max_buffer_len = max_buffer_len;
+            query.resp_buffer_len = max_buffer_len;
         }
         debug!("Chunks: {:?}", chunks.len());
         assert!(chunks[chunks.len() - 1].r == 0);
@@ -394,7 +395,7 @@ mod tests {
 
         let data = "A".repeat(300); // Large data
         let query =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 15 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 15 };
         let mut chunks = Vec::new();
 
         loop {
@@ -414,7 +415,7 @@ mod tests {
 
         //start again
         let new_query =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 13 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 13 };
         loop {
             let chunk = buffer_map.get_next_data_chunk(addr, &new_query, &data);
             chunks.push(chunk.clone());
@@ -439,7 +440,7 @@ mod tests {
 
         let data = "B".repeat(100); // Large data
         let query =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 100 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
 
         let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
         assert_eq!(chunk.r, 0);
@@ -459,7 +460,7 @@ mod tests {
 
         let data = "B".repeat(3355); // Large data
         let query =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 512 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 512 };
         let mut chunks = Vec::new();
 
         loop {
@@ -496,9 +497,9 @@ mod tests {
         let data2 = "B".repeat(1000);
 
         let query1 =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 100 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
         let query2 =
-            QueryReq { query_type: QueryApi::HostInfo, max_buffer_len: 100 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
 
         let mut chunks1 = Vec::new();
         let mut chunks2 = Vec::new();

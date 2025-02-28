@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use super::mobile_sdp_types::{MobileSdpAnswer, MobileSdpOffer};
+use super::{
+    ble_cmd_api::MAX_BUFFER_LEN,
+    mobile_sdp_types::{MobileSdpAnswer, MobileSdpOffer},
+};
 use crate::app_data::MobileSchema;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -40,7 +43,7 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
 
     async fn get_host_info<'a>(
         &'a mut self, addr: String,
-    ) -> Result<&'a HostProvInfo>;
+    ) -> Result<&'a String>;
 
     //call establishment
     async fn set_mobile_sdp_offer(
@@ -53,7 +56,7 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
 
     async fn get_sdp_answer<'a>(
         &'a mut self, addr: String,
-    ) -> Result<&'a MobileSdpAnswer>;
+    ) -> Result<&'a String>;
 
     //disconnected device
     async fn mobile_disconnected(&mut self, addr: String) -> Result<()>;
@@ -107,7 +110,7 @@ struct BleServerCommHandler {
 impl BleServerCommHandler {
     pub fn new() -> Self {
         Self {
-            buffer_map: MobileBufferMap::new(5000),
+            buffer_map: MobileBufferMap::new(MAX_BUFFER_LEN),
             pubsub_topics_map: HashMap::new(),
         }
     }
@@ -122,15 +125,11 @@ impl BleServerCommHandler {
         //get the data requested
         let data = match query.query_type {
             QueryApi::HostInfo => {
-                let host_info =
-                    comm_handler.get_host_info(addr.clone()).await?;
-                serde_json::to_string(&host_info)?
+                comm_handler.get_host_info(addr.clone()).await?
             }
 
             QueryApi::SdpAnswer => {
-                let sdp_offer =
-                    comm_handler.get_sdp_answer(addr.clone()).await?;
-                serde_json::to_string(&sdp_offer)?
+                comm_handler.get_sdp_answer(addr.clone()).await?
             }
         };
 
@@ -145,7 +144,7 @@ impl BleServerCommHandler {
         &mut self, comm_handler: &mut impl MultiMobileCommService,
         addr: Address, cmd: CommandReq,
     ) -> Result<()> {
-        debug!("Command: {:?}", cmd.cmd_type);
+        debug!("Command: {:?}", cmd);
 
         let Some(buffer) = self.buffer_map.get_complete_buffer(&addr, &cmd)
         else {
@@ -163,6 +162,7 @@ impl BleServerCommHandler {
             }
             CmdApi::SdpOffer => {
                 let mobile_offer = serde_json::from_str(&buffer)?;
+                debug!("Mobile offer: {:?}", mobile_offer);
                 comm_handler.set_mobile_sdp_offer(addr, mobile_offer).await
             }
         }
@@ -172,7 +172,7 @@ impl BleServerCommHandler {
         &mut self, comm_handler: &mut impl MultiMobileCommService,
         addr: Address, sub: SubReq,
     ) -> Result<PubSubSubscriber> {
-        let SubReq { topic, max_buffer_len } = sub;
+        let SubReq { topic, resp_buffer_len: max_buffer_len } = sub;
 
         let publisher = self
             .pubsub_topics_map

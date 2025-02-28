@@ -78,6 +78,7 @@ async fn sdp_exchanger(
 
     let reader_server_requester = server_conn.clone();
 
+    let mtu_metadata_overhead = 7;
     let app = Application {
         services: vec![Service {
             uuid: host_id,
@@ -109,7 +110,7 @@ async fn sdp_exchanger(
                                 .query(
                                     req.device_address.to_string(),
                                     QueryApi::SdpAnswer,
-                                    (req.mtu as usize) - 80,
+                                    (req.mtu as usize) - mtu_metadata_overhead,
                                 )
                                 .await
                             {

@@ -1,7 +1,7 @@
 use crate::{ble::mobile_sdp_types::VideoProp, error::Result};
 use anyhow::anyhow;
 use gst_webrtc::WebRTCBundlePolicy;
-use std::{fs::OpenOptions, io::Write, sync::mpsc, thread, time::Duration};
+use std::{fs::OpenOptions, io::Write, sync::mpsc, thread};
 use v4l::{video::Output, Device, FourCC};
 
 use gst::{
@@ -96,9 +96,6 @@ fn create_pipeline(
     //single transport
 
     let queue = ElementFactory::make("queue").build()?;
-    queue.set_property("max-size-buffers", 1u32);
-    queue.set_property("max-size-bytes", 0u32);
-    queue.set_property("max-size-time", 0u64);
 
     let rtph264depay = ElementFactory::make("rtph264depay").build()?;
     let h264dec = ElementFactory::make("avdec_h264").build()?;
@@ -123,7 +120,7 @@ fn create_pipeline(
 
     capsfilter.set_property("caps", &caps);
 
-    let v4l2sink = ElementFactory::make("v4l2sink").build()?;
+    //    let v4l2sink = ElementFactory::make("v4l2sink").build()?;
 
     /*
      * NV12 @ 540x960
@@ -153,7 +150,7 @@ fn create_pipeline(
 
     info!("v4l2 format after configured: {:?}", format);
 
-    v4l2sink.set_property("device", &vdevice);
+    //v4l2sink.set_property("device", &vdevice);
 
     let appsink = ElementFactory::make("appsink").build()?;
     appsink.set_property("emit-signals", true);

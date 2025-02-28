@@ -3,7 +3,6 @@ use crate::ble::{VDeviceBuilderOps, VDeviceMap};
 use crate::error::Result;
 use async_trait::async_trait;
 use log::{error, info};
-use std::path::PathBuf;
 use system_utils::{load_kmodule, unload_kmodule, update_dir_permissions};
 mod system_utils;
 mod vdevice;
@@ -58,13 +57,6 @@ impl VDeviceBuilderOps for VDeviceBuilder {
                     continue;
                 }
             };
-            let path =
-                PathBuf::from(format!("/dev/video{}", vdevice.device_num));
-
-            info!(
-                "Created virtual device with name {} in path {:?}",
-                &vdevice.name, &path
-            );
 
             device_map.insert(camera_name, vdevice);
         }
