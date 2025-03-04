@@ -7,6 +7,8 @@ pub type Responder<T> = oneshot::Sender<T>;
 
 pub const MAX_BUFFER_LEN: usize = 5000; //max buffer length
 
+pub type CommBuffer = Vec<u8>;
+
 /// Represents a chunk of data with remaining length and buffer.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -14,8 +16,7 @@ pub struct DataChunk {
     /// Remaining length of the data.
     pub r: usize,
     /// Buffer containing the data.
-    /// leave this as a string and not overprocess it
-    pub d: String,
+    pub d: CommBuffer,
 }
 
 /// Request structure for a query.
@@ -28,7 +29,7 @@ pub struct QueryReq {
 }
 
 /// Type alias for a query response.
-pub type QueryResp = Responder<Result<DataChunk>>;
+pub type QueryResp = Responder<Result<CommBuffer>>;
 
 /// Request structure for a command.
 #[derive(Debug)]
@@ -36,7 +37,7 @@ pub struct CommandReq {
     /// Type of the command.
     pub cmd_type: CmdApi,
     /// Payload of the command.
-    pub payload: DataChunk,
+    pub payload: CommBuffer,
 }
 
 /// Type alias for a command response.

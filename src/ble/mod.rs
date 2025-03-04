@@ -10,6 +10,7 @@ pub mod ble_clients;
 pub mod ble_cmd_api;
 pub mod ble_requester;
 pub mod ble_server;
+pub mod buffer_process;
 pub mod mobile_buffer;
 pub mod mobile_comm;
 pub mod mobile_sdp_types;

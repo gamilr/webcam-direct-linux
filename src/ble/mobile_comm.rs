@@ -1,4 +1,4 @@
-use crate::app_data::MobileSchema;
+use crate::{app_data::MobileSchema, ble::buffer_process::serialize_data};
 use base64::prelude::*;
 use std::collections::HashMap;
 
@@ -45,7 +45,7 @@ pub type VDeviceMap = HashMap<String, VDevice>;
 pub struct VDeviceInfo {
     publisher: Option<BlePublisher>,
     vdevices: VDeviceMap,
-    sdp_answer_cache: Option<String>,
+    sdp_answer_cache: Option<Vec<u8>>,
 }
 
 #[async_trait]
@@ -67,7 +67,7 @@ pub struct MobileComm<Db, VDevBuilder> {
     vdev_builder: VDevBuilder,
 
     //host cache
-    host_prov_info_cache: Option<String>,
+    host_prov_info_cache: Option<Vec<u8>>,
 }
 
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
@@ -88,25 +88,10 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
     for MobileComm<Db, VDevBuilder>
 {
     //provisioning
-    async fn get_host_info<'a>(
-        &'a mut self, addr: Address,
-    ) -> Result<&'a String> {
+    async fn get_host_info(&mut self, addr: Address) -> Result<HostProvInfo> {
         debug!("Host info requested by: {:?}", addr);
 
-        //check if the host info is already cached
-        if let None = self.host_prov_info_cache {
-            let host_info = self.db.get_host_prov_info()?;
-
-            let host_info_b64 =
-                BASE64_STANDARD.encode(serde_json::to_vec(&host_info)?);
-
-            self.host_prov_info_cache = Some(host_info_b64);
-        }
-
-        //get the host info
-        Ok(self.host_prov_info_cache.as_ref().ok_or_else(|| {
-            anyhow!("Host info not found in connected devices")
-        })?)
+        self.db.get_host_prov_info()
     }
 
     async fn register_mobile(
@@ -168,9 +153,9 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
         Ok(())
     }
 
-    async fn get_sdp_answer<'a>(
-        &'a mut self, addr: Address,
-    ) -> Result<&'a String> {
+    async fn get_sdp_answer(
+        &mut self, addr: Address,
+    ) -> Result<Vec<CameraSdp>> {
         debug!("SDP answer requested by: {:?}", addr);
 
         let vdevice_info = self
@@ -178,40 +163,15 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?;
 
-        //check if the SDP answer is already cached
-        if let None = vdevice_info.sdp_answer_cache {
-            let sdp_answer = vdevice_info
-                .vdevices
-                .iter()
-                .map(|(name, vdevice)| CameraSdp {
-                    name: name.clone(),
-                    format: VideoProp::default(),
-                    sdp: vdevice.get_sdp_answer().clone(),
-                })
-                .collect::<Vec<CameraSdp>>();
-
-            let sdp_answer_b64 =
-                BASE64_STANDARD.encode(serde_json::to_vec(&sdp_answer)?);
-
-            debug!(
-                "encoded SDP answer: {} with len {}",
-                sdp_answer_b64,
-                sdp_answer_b64.len(),
-            );
-
-            vdevice_info.sdp_answer_cache = Some(sdp_answer_b64);
-
-            debug!("SDP answer cached for mobile: {:?}", addr);
-        }
-
-        let sdp_answer =
-            vdevice_info.sdp_answer_cache.as_ref().ok_or_else(|| {
-                anyhow!("SDP answer not found in connected devices")
-            })?;
-
-        info!("SDP answer {:?} for mobile {:?} is ready", sdp_answer, addr);
-
-        Ok(sdp_answer)
+        Ok(vdevice_info
+            .vdevices
+            .iter()
+            .map(|(name, vdevice)| CameraSdp {
+                name: name.clone(),
+                format: VideoProp::default(),
+                sdp: vdevice.get_sdp_answer().clone(),
+            })
+            .collect::<Vec<CameraSdp>>())
     }
 
     //disconnect the mobile device

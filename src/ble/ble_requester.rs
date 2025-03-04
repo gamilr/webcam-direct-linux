@@ -1,45 +1,26 @@
-use crate::{ble::ble_cmd_api::MAX_BUFFER_LEN, error::Result};
+use crate::error::Result;
 use anyhow::anyhow;
-use log::info;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::ble_cmd_api::{
-    BleApi, BleComm, CmdApi, CommandReq, DataChunk, PubReq, PubSubPublisher,
-    PubSubSubscriber, PubSubTopic, QueryApi, QueryReq, SubReq,
+    BleApi, BleComm, CmdApi, CommBuffer, CommandReq, DataChunk, PubReq,
+    PubSubPublisher, PubSubSubscriber, PubSubTopic, QueryApi, QueryReq, SubReq,
 };
 
 #[derive(Clone)]
 pub struct BleRequester {
     ble_tx: mpsc::Sender<BleComm>,
-    chunk_len: usize,
 }
 
 impl BleRequester {
     pub fn new(ble_tx: mpsc::Sender<BleComm>) -> Self {
-        //get the data structure length
-        let chunk_len = match serde_json::to_vec(&DataChunk {
-            r: MAX_BUFFER_LEN,
-            d: "".to_string(),
-        }) {
-            Ok(chunk) => chunk.len(),
-            Err(e) => {
-                info!("Error to serialize data chunk {:?}", e);
-                0
-            }
-        };
-
-        info!("DataChunk length: {}", chunk_len);
-
-        Self { ble_tx, chunk_len }
+        Self { ble_tx }
     }
 
     pub async fn query(
-        &self, addr: String, query_type: QueryApi, max_buffer_len: usize,
-    ) -> Result<Vec<u8>> {
-        let query_req = QueryReq {
-            query_type,
-            resp_buffer_len: max_buffer_len - self.chunk_len,
-        };
+        &self, addr: String, query_type: QueryApi, resp_buffer_len: usize,
+    ) -> Result<CommBuffer> {
+        let query_req = QueryReq { query_type, resp_buffer_len };
 
         let (tx, rx) = oneshot::channel();
 
@@ -47,27 +28,14 @@ impl BleRequester {
 
         self.ble_tx.send(ble_comm).await?;
 
-        match rx.await? {
-            Ok(data_chunk) => serde_json::to_vec(&data_chunk)
-                .map_err(|e| anyhow!("Error to serialize data chunk {:?}", e)),
-            Err(e) => Err(anyhow!("Error to get data chunk {:?}", e)),
-        }
+        rx.await?
     }
 
     pub async fn cmd(
-        &self, addr: String, cmd_type: CmdApi, data: Vec<u8>,
+        &self, addr: String, cmd_type: CmdApi, data: CommBuffer,
     ) -> Result<()> {
-        let data_str = String::from_utf8(data.clone())
-            .map_err(|e| anyhow!("Error to convert data to string {:?}", e))?;
-        info!("Command data: {}", data_str);
-        let cmd_req = CommandReq {
-            cmd_type,
-            payload: if data.is_empty() {
-                DataChunk::default()
-            } else {
-                serde_json::from_slice(&data)?
-            },
-        };
+        //create the command request
+        let cmd_req = CommandReq { cmd_type, payload: data };
 
         let (tx, rx) = oneshot::channel();
 
@@ -79,10 +47,9 @@ impl BleRequester {
     }
 
     pub async fn subscribe(
-        &self, addr: String, topic: PubSubTopic, max_buffer_len: usize,
+        &self, addr: String, topic: PubSubTopic, resp_buffer_len: usize,
     ) -> Result<BleSubscriber> {
-        let sub_req =
-            SubReq { topic, resp_buffer_len: max_buffer_len - self.chunk_len };
+        let sub_req = SubReq { topic, resp_buffer_len };
 
         let (tx, rx) = oneshot::channel();
 
@@ -126,10 +93,7 @@ impl BlePublisher {
 
         for chunk in buffer.chunks(self.max_buffer_len) {
             remain_len -= chunk.len();
-            let data_chunk = DataChunk {
-                r: remain_len,
-                d: String::from_utf8(chunk.to_owned())?,
-            };
+            let data_chunk = DataChunk { r: remain_len, d: chunk.to_owned() };
 
             self.publisher_tx.send(data_chunk)?;
         }

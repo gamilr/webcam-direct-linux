@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
 use super::{
-    ble_cmd_api::MAX_BUFFER_LEN,
-    mobile_sdp_types::{MobileSdpAnswer, MobileSdpOffer},
+    ble_cmd_api::{CommBuffer, MAX_BUFFER_LEN},
+    mobile_sdp_types::{CameraSdp, MobileSdpOffer},
 };
-use crate::app_data::MobileSchema;
+use crate::{
+    app_data::MobileSchema,
+    ble::buffer_process::{deserialize_data, serialize_data},
+};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -18,8 +21,8 @@ use mockall::automock;
 
 use super::{
     ble_cmd_api::{
-        Address, BleApi, BleComm, CmdApi, CommandReq, DataChunk, PubReq,
-        PubSubSubscriber, PubSubTopic, QueryApi, QueryReq, SubReq,
+        Address, BleApi, BleComm, CmdApi, CommandReq, PubReq, PubSubSubscriber,
+        PubSubTopic, QueryApi, QueryReq, SubReq,
     },
     ble_requester::{BlePublisher, BleRequester},
     mobile_buffer::MobileBufferMap,
@@ -41,9 +44,7 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, mobile: MobileSchema,
     ) -> Result<()>;
 
-    async fn get_host_info<'a>(
-        &'a mut self, addr: String,
-    ) -> Result<&'a String>;
+    async fn get_host_info(&mut self, addr: String) -> Result<HostProvInfo>;
 
     //call establishment
     async fn set_mobile_sdp_offer(
@@ -54,9 +55,7 @@ pub trait MultiMobileCommService: Send + Sync + 'static {
         &mut self, addr: String, publisher: BlePublisher,
     ) -> Result<()>;
 
-    async fn get_sdp_answer<'a>(
-        &'a mut self, addr: String,
-    ) -> Result<&'a String>;
+    async fn get_sdp_answer(&mut self, addr: String) -> Result<Vec<CameraSdp>>;
 
     //disconnected device
     async fn mobile_disconnected(&mut self, addr: String) -> Result<()>;
@@ -101,9 +100,16 @@ impl BleServer {
     }
 }
 
+//data cache
+struct ServerDataCache {
+    host_info: Option<Vec<u8>>,
+    sdp_answer: HashMap<Address, Option<Vec<u8>>>,
+}
+
 //Handle the communication
 struct BleServerCommHandler {
     buffer_map: MobileBufferMap,
+    server_data_cache: ServerDataCache,
     pubsub_topics_map: HashMap<PubSubTopic, BlePublisher>,
 }
 
@@ -111,6 +117,10 @@ impl BleServerCommHandler {
     pub fn new() -> Self {
         Self {
             buffer_map: MobileBufferMap::new(MAX_BUFFER_LEN),
+            server_data_cache: ServerDataCache {
+                host_info: None,
+                sdp_answer: HashMap::new(),
+            },
             pubsub_topics_map: HashMap::new(),
         }
     }
@@ -119,17 +129,37 @@ impl BleServerCommHandler {
     async fn handle_query(
         &mut self, comm_handler: &mut impl MultiMobileCommService,
         addr: Address, query: QueryReq,
-    ) -> Result<DataChunk> {
+    ) -> Result<CommBuffer> {
         debug!("Query: {:?}", query.query_type);
 
         //get the data requested
         let data = match query.query_type {
             QueryApi::HostInfo => {
-                comm_handler.get_host_info(addr.clone()).await?
+                if self.server_data_cache.host_info.is_none() {
+                    let host_info =
+                        comm_handler.get_host_info(addr.clone()).await?;
+                    let host_info = serialize_data(&host_info)?;
+                    self.server_data_cache.host_info = Some(host_info.clone());
+                }
+                self.server_data_cache.host_info.as_ref().unwrap()
             }
 
             QueryApi::SdpAnswer => {
-                comm_handler.get_sdp_answer(addr.clone()).await?
+                if self.server_data_cache.sdp_answer.get(&addr).is_none() {
+                    let sdp_answer =
+                        comm_handler.get_sdp_answer(addr.clone()).await?;
+                    let sdp_answer = serialize_data(&sdp_answer)?;
+                    self.server_data_cache
+                        .sdp_answer
+                        .insert(addr.clone(), Some(sdp_answer.clone()));
+                }
+
+                self.server_data_cache
+                    .sdp_answer
+                    .get(&addr)
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
             }
         };
 
@@ -137,16 +167,16 @@ impl BleServerCommHandler {
         info!("Query request: {:?}", query);
 
         //return the data
-        Ok(self.buffer_map.get_next_data_chunk(&addr, &query, &data))
+        self.buffer_map.get_next_data_chunk(&addr, &query, &data)
     }
 
     async fn handle_command(
         &mut self, comm_handler: &mut impl MultiMobileCommService,
         addr: Address, cmd: CommandReq,
     ) -> Result<()> {
-        debug!("Command: {:?}", cmd);
+        debug!("Command: {:?}", cmd.cmd_type);
 
-        let Some(buffer) = self.buffer_map.get_complete_buffer(&addr, &cmd)
+        let Some(buffer) = self.buffer_map.get_complete_buffer(&addr, &cmd)?
         else {
             return Ok(());
         };
@@ -154,14 +184,15 @@ impl BleServerCommHandler {
         match cmd.cmd_type {
             CmdApi::MobileDisconnected => {
                 self.buffer_map.remove_mobile(&addr);
+                self.server_data_cache.sdp_answer.remove(&addr);
                 comm_handler.mobile_disconnected(addr).await
             }
             CmdApi::RegisterMobile => {
-                let mobile = serde_json::from_str(&buffer)?;
+                let mobile = deserialize_data(&buffer)?;
                 comm_handler.register_mobile(addr, mobile).await
             }
             CmdApi::SdpOffer => {
-                let mobile_offer = serde_json::from_str(&buffer)?;
+                let mobile_offer = deserialize_data(&buffer)?;
                 debug!("Mobile offer: {:?}", mobile_offer);
                 comm_handler.set_mobile_sdp_offer(addr, mobile_offer).await
             }
