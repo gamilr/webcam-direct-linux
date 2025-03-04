@@ -1,6 +1,6 @@
-use super::gatt_const::CHAR_PNP_EXCHANGE_SDP_UUID;
-use crate::ble::ble_cmd_api::{CmdApi, PubSubTopic, QueryApi};
-use crate::ble::ble_requester::{BleRequester, BleSubscriber};
+use super::gatt_uuids::CHAR_PNP_EXCHANGE_SDP_UUID;
+use crate::ble::api::{CmdApi, PubSubTopic, QueryApi};
+use crate::ble::requester::{BleRequester, BleSubscriber};
 use crate::error::Result;
 use bluer::adv::Advertisement;
 use bluer::gatt::local::{
@@ -224,7 +224,7 @@ async fn sdp_exchanger(
             //receive data from server
             _ = async {
                 let sub_data = match &mut sub_recv_opt {
-                    Some(pub_recv) => pub_recv.get_data().await,
+                    Some(pub_recv) => pub_recv.recv().await,
                     None => future::pending().await,
                 };
 

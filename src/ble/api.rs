@@ -1,5 +1,4 @@
 use crate::error::Result;
-use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, oneshot};
 
 /// Type alias for a responder using oneshot channel.
@@ -8,16 +7,6 @@ pub type Responder<T> = oneshot::Sender<T>;
 pub const MAX_BUFFER_LEN: usize = 5000; //max buffer length
 
 pub type CommBuffer = Vec<u8>;
-
-/// Represents a chunk of data with remaining length and buffer.
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct DataChunk {
-    /// Remaining length of the data.
-    pub r: usize,
-    /// Buffer containing the data.
-    pub d: CommBuffer,
-}
 
 /// Request structure for a query.
 #[derive(Debug)]
@@ -44,10 +33,10 @@ pub struct CommandReq {
 pub type CommandResp = Responder<Result<()>>;
 
 /// Type alias for a PubSub publisher.
-pub type PubSubPublisher = broadcast::Sender<DataChunk>;
+pub type PubSubPublisher = broadcast::Sender<CommBuffer>;
 
 /// Type alias for a PubSub subscriber.
-pub type PubSubSubscriber = broadcast::Receiver<DataChunk>;
+pub type PubSubSubscriber = broadcast::Receiver<CommBuffer>;
 
 /// Request structure for a subscription.
 pub struct SubReq {
@@ -65,7 +54,7 @@ pub struct PubReq {
     /// Topic to publish to.
     pub topic: PubSubTopic,
     /// Payload to publish.
-    pub payload: DataChunk,
+    pub payload: CommBuffer,
 }
 
 /// Type alias for a publish response.

@@ -2,9 +2,14 @@ use crate::error::Result;
 use anyhow::anyhow;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-use super::ble_cmd_api::{
-    BleApi, BleComm, CmdApi, CommBuffer, CommandReq, DataChunk, PubReq,
-    PubSubPublisher, PubSubSubscriber, PubSubTopic, QueryApi, QueryReq, SubReq,
+
+use super::{
+    api::{
+        BleApi, BleComm, CmdApi, CommBuffer, CommandReq, PubReq,
+        PubSubPublisher, PubSubSubscriber, PubSubTopic, QueryApi, QueryReq,
+        SubReq,
+    },
+    comm_types::DataChunk,
 };
 
 #[derive(Clone)]
@@ -64,7 +69,7 @@ impl BleRequester {
     pub async fn publish(
         &self, addr: String, topic: PubSubTopic, data: Vec<u8>,
     ) -> Result<()> {
-        let pub_req = PubReq { topic, payload: serde_json::from_slice(&data)? };
+        let pub_req = PubReq { topic, payload: data };
 
         let (tx, rx) = oneshot::channel();
 
@@ -79,23 +84,24 @@ impl BleRequester {
 #[derive(Clone, Debug)]
 pub struct BlePublisher {
     publisher_tx: PubSubPublisher,
-    max_buffer_len: usize,
+    resp_buffer_len: usize,
 }
 
 impl BlePublisher {
-    pub fn new(max_buffer_len: usize) -> Self {
+    pub fn new(resp_buffer_len: usize) -> Self {
         let (publisher_tx, _) = broadcast::channel(128);
-        Self { publisher_tx, max_buffer_len }
+
+        Self { publisher_tx, resp_buffer_len }
     }
 
     pub async fn publish(&self, buffer: Vec<u8>) -> Result<()> {
         let mut remain_len = buffer.len();
 
-        for chunk in buffer.chunks(self.max_buffer_len) {
+        for chunk in buffer.chunks(self.resp_buffer_len) {
             remain_len -= chunk.len();
             let data_chunk = DataChunk { r: remain_len, d: chunk.to_owned() };
 
-            self.publisher_tx.send(data_chunk)?;
+            self.publisher_tx.send(data_chunk.try_into()?)?;
         }
 
         Ok(())
@@ -115,12 +121,10 @@ impl BleSubscriber {
         Self { subscriber_rx }
     }
 
-    pub async fn get_data(&mut self) -> Result<Vec<u8>> {
-        if let Ok(data_chunk) = self.subscriber_rx.recv().await {
-            return serde_json::to_vec(&data_chunk)
-                .map_err(|e| anyhow!("Error to serialize data chunk {:?}", e));
-        }
-
-        Err(anyhow!("Error to get data chunk"))
+    pub async fn recv(&mut self) -> Result<Vec<u8>> {
+        self.subscriber_rx
+            .recv()
+            .await
+            .map_err(|_| anyhow!("Subscriber dropped"))
     }
 }

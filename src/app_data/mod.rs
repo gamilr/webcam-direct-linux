@@ -12,12 +12,12 @@ use log::error;
 use log::info;
 pub use schemas::ConnectionType;
 pub use schemas::HostSchema;
-pub use schemas::MobileId;
 pub use schemas::MobileSchema;
 use uuid::Uuid;
 
-use crate::ble::ble_server::HostProvInfo;
-use crate::ble::AppDataStore;
+use crate::ble::comm_types::HostProvInfo;
+use crate::ble::server::mobile_comm::AppDataStore;
+
 use crate::error::Result;
 
 /// A struct that holds the application's data store.

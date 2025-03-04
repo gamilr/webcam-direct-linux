@@ -1,17 +1,16 @@
-use crate::{app_data::MobileSchema, ble::buffer_process::serialize_data};
-use base64::prelude::*;
+use crate::app_data::MobileSchema;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use log::{debug, error, info, trace};
+use log::debug;
 
 use anyhow::anyhow;
 
-use super::{
-    ble_cmd_api::Address,
-    ble_requester::BlePublisher,
-    ble_server::{HostProvInfo, MultiMobileCommService},
-    mobile_sdp_types::{CameraSdp, MobileSdpAnswer, MobileSdpOffer, VideoProp},
+use crate::ble::{
+    api::Address,
+    comm_types::{CameraSdp, HostProvInfo, MobileSdpOffer, VideoProp},
+    requester::BlePublisher,
+    server::CommDataService,
 };
 use crate::error::Result;
 use crate::vdevice_builder::VDevice;
@@ -45,7 +44,6 @@ pub type VDeviceMap = HashMap<String, VDevice>;
 pub struct VDeviceInfo {
     publisher: Option<BlePublisher>,
     vdevices: VDeviceMap,
-    sdp_answer_cache: Option<Vec<u8>>,
 }
 
 #[async_trait]
@@ -65,26 +63,18 @@ pub struct MobileComm<Db, VDevBuilder> {
 
     //virtual device builder
     vdev_builder: VDevBuilder,
-
-    //host cache
-    host_prov_info_cache: Option<Vec<u8>>,
 }
 
 impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
     MobileComm<Db, VDevBuilder>
 {
     pub fn new(db: Db, vdev_builder: VDevBuilder) -> Result<Self> {
-        Ok(Self {
-            db,
-            mobiles_connected: HashMap::new(),
-            vdev_builder,
-            host_prov_info_cache: None,
-        })
+        Ok(Self { db, mobiles_connected: HashMap::new(), vdev_builder })
     }
 }
 
 #[async_trait]
-impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
+impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
     for MobileComm<Db, VDevBuilder>
 {
     //provisioning
@@ -115,7 +105,6 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MultiMobileCommService
             VDeviceInfo {
                 publisher: Some(publisher),
                 vdevices: HashMap::new(),
-                sdp_answer_cache: None,
             },
         );
 

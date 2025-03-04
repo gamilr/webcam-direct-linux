@@ -1,4 +1,4 @@
-use crate::{ble::mobile_sdp_types::VideoProp, error::Result};
+use crate::{ble::comm_types::VideoProp, error::Result};
 use anyhow::anyhow;
 use gst_webrtc::WebRTCBundlePolicy;
 use std::{fs::OpenOptions, io::Write, sync::mpsc, thread};

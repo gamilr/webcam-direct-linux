@@ -1,8 +1,10 @@
-use crate::ble::mobile_sdp_types::CameraSdp;
-use crate::ble::{VDeviceBuilderOps, VDeviceMap};
+use crate::ble::server::mobile_comm::VDeviceMap;
+use crate::ble::{
+    comm_types::CameraSdp, server::mobile_comm::VDeviceBuilderOps,
+};
 use crate::error::Result;
 use async_trait::async_trait;
-use log::{error, info};
+use log::error;
 use system_utils::{load_kmodule, unload_kmodule, update_dir_permissions};
 mod system_utils;
 mod vdevice;
@@ -26,7 +28,7 @@ impl VDeviceBuilder {
         if !is_kmodule_loaded("/proc/modules", "videodev").await? {
             is_v4l2loopback_loaded = true;
             load_kmodule("videodev", None).await?;
-            //update_dir_permissions("/dev/v4l2loopback", "o+r").await?;
+            update_dir_permissions("/dev/v4l2loopback", "o+r").await?;
         }
 
         //check for v4l2loopback module

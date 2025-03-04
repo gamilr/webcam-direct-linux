@@ -10,14 +10,12 @@
 //! To support multiple channels in parallel in the same device
 //! and the same api we need to add a transaction id or any other identifier.
 
-use crate::ble::{ble_cmd_api::MAX_BUFFER_LEN, buffer_process::serialize_data};
+use crate::ble::api::MAX_BUFFER_LEN;
 
-use super::{
-    ble_cmd_api::{
-        Address, CmdApi, CommBuffer, CommandReq, DataChunk, QueryApi, QueryReq,
-    },
-    buffer_process::deserialize_data,
+use crate::ble::api::{
+    Address, CmdApi, CommBuffer, CommandReq, QueryApi, QueryReq,
 };
+use crate::ble::comm_types::DataChunk;
 use crate::error::Result;
 use log::{error, info, warn};
 use std::collections::HashMap;
@@ -34,10 +32,6 @@ pub struct MobileBufferMap {
     /// A map storing the buffer status for each mobile address.
     mobile_buffer_status: HashMap<Address, BufferCursor>,
 
-    /// Buffer size limit for each mobile device in bytes
-    /// hard coded to 5000 bytes
-    buffer_size_limit: usize,
-
     /// Datachunk overhead len
     chunk_len: usize,
 }
@@ -53,22 +47,9 @@ impl MobileBufferMap {
     /// ```
     /// let buffer_map = MobileBufferMap::new(1024);
     /// ```
-    pub fn new(buffer_max_len: usize) -> Self {
-        let chunk_len =
-            match serialize_data(&DataChunk { r: MAX_BUFFER_LEN, d: vec![] }) {
-                Ok(chunk) => chunk.len(),
-                Err(e) => {
-                    info!("Error to serialize data chunk {:?}", e);
-                    0
-                }
-            };
-
+    pub fn new(chunk_len: usize) -> Self {
         info!("DataChunk length: {}", chunk_len);
-        Self {
-            mobile_buffer_status: HashMap::new(),
-            buffer_size_limit: buffer_max_len,
-            chunk_len,
-        }
+        Self { mobile_buffer_status: HashMap::new(), chunk_len }
     }
 
     /// Removes a mobile device from the buffer map.
@@ -132,14 +113,12 @@ impl MobileBufferMap {
     /// ```
     pub fn get_next_data_chunk<P: AsRef<[u8]>>(
         &mut self, addr: &str, query: &QueryReq, data: &P,
-    ) -> Result<CommBuffer> {
+    ) -> Result<Vec<u8>> {
         let QueryReq { query_type, resp_buffer_len } = query;
 
         let resp_buffer_len = resp_buffer_len - self.chunk_len;
 
         let data = data.as_ref();
-
-        let max_buffer_size = self.buffer_size_limit;
 
         let BufferCursor { reader, .. } = self.get_cursors(addr);
 
@@ -161,8 +140,8 @@ impl MobileBufferMap {
             d: data[chunk_start..chunk_end].to_owned(),
         };
 
-        if data_chunk.r == 0 || resp_buffer_len > max_buffer_size {
-            if resp_buffer_len > max_buffer_size {
+        if data_chunk.r == 0 || resp_buffer_len > MAX_BUFFER_LEN {
+            if resp_buffer_len > MAX_BUFFER_LEN {
                 warn!(
                     "Max buffer limit reached for mobile with addr: {}",
                     addr
@@ -175,7 +154,7 @@ impl MobileBufferMap {
         info!("DataChunk payload len: {}", data_chunk.d.len());
 
         // Serialize the data chunk
-        serialize_data(&data_chunk)
+        data_chunk.try_into()
     }
 
     /// Retrieves the full buffer for a mobile device by accumulating data chunks.
@@ -212,9 +191,7 @@ impl MobileBufferMap {
         let CommandReq { cmd_type, payload } = cmd;
 
         //deserialize the data chunk
-        let payload: DataChunk = deserialize_data(payload)?;
-
-        let max_buffer_size = self.buffer_size_limit;
+        let payload: DataChunk = payload.clone().try_into()?;
 
         //get the writer cursor
         let BufferCursor { writer, .. } = self.get_cursors(addr);
@@ -222,7 +199,7 @@ impl MobileBufferMap {
         let curr_buffer = writer.entry(cmd_type.clone()).or_default();
 
         //check if the buffer limit is reached
-        if curr_buffer.len() + payload.d.len() > max_buffer_size {
+        if curr_buffer.len() + payload.d.len() > MAX_BUFFER_LEN {
             error!("Buffer limit reached for mobile with addr: {}", addr);
             writer.remove(cmd_type); //remove the writer channel when done
             return Ok(None);

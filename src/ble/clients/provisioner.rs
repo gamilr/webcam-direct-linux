@@ -1,7 +1,7 @@
 //! Serves a Bluetooth GATT application using the IO programming model.
-use super::gatt_const::{CHAR_PROV_INFO_UUID, SERV_PROV_INFO_UUID};
-use crate::ble::ble_cmd_api::{CmdApi, QueryApi};
-use crate::ble::ble_requester::BleRequester;
+use super::gatt_uuids::{CHAR_PROV_INFO_UUID, SERV_PROV_INFO_UUID};
+use crate::ble::api::{CmdApi, QueryApi};
+use crate::ble::requester::BleRequester;
 use crate::error::Result;
 use bluer::{
     adv::{Advertisement, AdvertisementHandle},

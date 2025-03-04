@@ -19,17 +19,18 @@ use app_data::{AppData, ConnectionType, DiskBasedDb, HostInfo};
 use error::Result;
 
 use ble::{
-    ble_clients::{
+    clients::{
         mobile_prop::MobilePropClient, provisioner::ProvisionerClient,
         sdp_exchanger::SdpExchangerClient,
     },
-    ble_server::BleServer,
-    AppDataStore, MobileComm,
+    server::BleServer,
 };
 use tokio::io::AsyncBufReadExt;
 
 use log::info;
 use vdevice_builder::VDeviceBuilder;
+
+use crate::ble::server::mobile_comm::{AppDataStore, MobileComm};
 
 fn setup_access_point() -> Result<impl AccessPointCtl> {
     let if_name = "wcdirect0";
@@ -120,6 +121,8 @@ async fn main() -> Result<()> {
         host_prov_info.name.clone(),
         host_prov_info.id,
     );
+
+    info!("Press any key or Ctrl-C to stop the process");
 
     tokio::select! {
       _ = signal::ctrl_c() => {

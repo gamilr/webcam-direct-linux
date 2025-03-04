@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::webrtc_pipeline::WebrtcPipeline;
-use crate::{ble::mobile_sdp_types::CameraSdp, error::Result};
+use crate::{ble::comm_types::CameraSdp, error::Result};
 use anyhow::anyhow;
 use log::error;
 use serde::{Deserialize, Serialize};
