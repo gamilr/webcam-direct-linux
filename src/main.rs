@@ -4,6 +4,8 @@ mod ble;
 mod error;
 mod vdevice_builder;
 
+use tokio::signal;
+
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},
     iw_link::{wdev_drv, IwLink},
@@ -119,10 +121,18 @@ async fn main() -> Result<()> {
         host_prov_info.id,
     );
 
-    info!("Service ready. Press enter to quit.");
-    let stdin = tokio::io::BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
-    let _ = lines.next_line().await;
+    tokio::select! {
+      _ = signal::ctrl_c() => {
+        info!("Received Ctrl-C, shutting down.");
+      }
+      _ = async {
+        let stdin = tokio::io::BufReader::new(tokio::io::stdin());
+        let mut lines = stdin.lines();
+        let _ = lines.next_line().await;
+      } => {
+            info!("Enter key pressed, shutting down.");
+        }
+    }
 
     info!("webcam direct stopped stopped");
 
