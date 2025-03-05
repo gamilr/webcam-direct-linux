@@ -15,7 +15,7 @@ use bluer::Adapter;
 use bluer::Uuid;
 use futures::FutureExt;
 use futures::{future, pin_mut, StreamExt};
-use log::{debug, error, info};
+use log::{error, info};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::oneshot::{self, Receiver};
 
@@ -41,9 +41,9 @@ impl SdpExchangerClient {
             )
             .await
             {
-                error!("SdpExchangerClient failed, error: {:?}", e);
+                error!("Sdp Exchanger Client failed to start, error: {:?}", e);
             } else {
-                info!("SdpExchanger started");
+                info!("Sdp Exchanger Client started");
             }
         });
 
@@ -70,7 +70,10 @@ async fn sdp_exchanger(
 
     let _adv_handle = ble_adapter.advertise(le_advertisement).await?;
 
-    info!("Serving GATT service on Bluetooth adapter {}", ble_adapter.name());
+    info!(
+        "Serving SDP Exhange GATT service on Bluetooth adapter {}",
+        ble_adapter.name()
+    );
 
     let (_service_control, service_handle) = service_control();
     let (char_pnp_exchange_control, char_pnp_exchange_handle) =
@@ -175,13 +178,13 @@ async fn sdp_exchanger(
                             notifier.mtu(),
                         ).await {
                             Ok(subscriber) => {
-                                if notifier_opt.is_some() && sub_recv_opt.is_some() {
-                                    debug!("Already have a notifier");
-                                    continue;
+                                if notifier_opt.is_none() {
+                                    notifier_opt = Some(notifier);
                                 }
 
-                                notifier_opt = Some(notifier);
-                                sub_recv_opt = Some(subscriber);
+                                if sub_recv_opt.is_none() {
+                                    sub_recv_opt = Some(subscriber);
+                                }
                             },
                             Err(e) => {
                                 error!("Failed to subscribe to sdp call: {:?}", e);
@@ -202,7 +205,7 @@ async fn sdp_exchanger(
 
                 match read_res {
                     Ok(0) => {
-                        info!("Write stream ended");
+                        info!("Sdp Exchanger writing stream ended");
                         pnp_reader_opt = None;
                     }
                     Ok(n) => {
@@ -215,7 +218,7 @@ async fn sdp_exchanger(
                         }
                     }
                     Err(err) => {
-                        info!("Write stream error: {}", &err);
+                        info!("Sdp Exchanges writing stream error: {}", &err);
                         pnp_reader_opt = None;
                     }
                 }
@@ -247,7 +250,6 @@ async fn sdp_exchanger(
             } => {
             }
             _ = &mut rx_drop => {
-                info!("SdpExchangerClient stopped");
                 break;
             }
 

@@ -128,16 +128,9 @@ async fn main() -> Result<()> {
       _ = signal::ctrl_c() => {
         info!("Received Ctrl-C, shutting down.");
       }
-      _ = async {
-        let stdin = tokio::io::BufReader::new(tokio::io::stdin());
-        let mut lines = stdin.lines();
-        let _ = lines.next_line().await;
-      } => {
-            info!("Enter key pressed, shutting down.");
-        }
     }
 
-    info!("webcam direct stopped stopped");
+    info!("webcam direct process stopped");
 
     Ok(())
 }
