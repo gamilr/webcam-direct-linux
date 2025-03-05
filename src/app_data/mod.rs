@@ -15,8 +15,9 @@ pub use schemas::HostSchema;
 pub use schemas::MobileSchema;
 use uuid::Uuid;
 
-use crate::ble::AppDataStore;
-use crate::ble::HostProvInfo;
+use crate::ble::comm_types::HostProvInfo;
+use crate::ble::server::mobile_comm::AppDataStore;
+
 use crate::error::Result;
 
 /// A struct that holds the application's data store.
@@ -89,7 +90,7 @@ where
             host.registered_mobiles.push(mobile.id.clone());
             self.data_db.update("host_info", &host)?;
             // Store the mobile info
-            self.data_db.add(&mobile.id, mobile)?;
+            self.data_db.add::<MobileSchema>(&mobile.id, mobile)?;
             info!("Mobile device added successfully.");
             return Ok(());
         }

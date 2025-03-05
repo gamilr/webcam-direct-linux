@@ -138,7 +138,7 @@ impl KvDbOps for DiskBasedDb {
         ItemType: Serialize + SchemaType,
     {
         let tree = self.db.open_tree(ItemType::KEYSPACE_NAME)?;
-        let serialized = bincode::serialize(data)?;
+        let serialized = bincode::serialize::<ItemType>(data)?;
         tree.insert(key, serialized)?;
         info!(
             "Added item with key: {} to keyspace: {}",
@@ -154,7 +154,7 @@ impl KvDbOps for DiskBasedDb {
     {
         let tree = self.db.open_tree(ItemType::KEYSPACE_NAME)?;
         if let Some(data) = tree.get(key)? {
-            let item: ItemType = bincode::deserialize(&data)?;
+            let item: ItemType = bincode::deserialize::<ItemType>(&data)?;
             info!(
                 "Read item with key: {} from keyspace: {}",
                 key,
@@ -175,7 +175,7 @@ impl KvDbOps for DiskBasedDb {
         ItemType: Serialize + SchemaType,
     {
         let tree = self.db.open_tree(ItemType::KEYSPACE_NAME)?;
-        let serialized = bincode::serialize(&data)?;
+        let serialized = bincode::serialize::<ItemType>(&data)?;
         tree.insert(key, serialized)?;
         info!(
             "Updated item with key: {} in keyspace: {}",
@@ -191,7 +191,7 @@ impl KvDbOps for DiskBasedDb {
     {
         let tree = self.db.open_tree(ItemType::KEYSPACE_NAME)?;
         if let Some(data) = tree.remove(key)? {
-            let item: ItemType = bincode::deserialize(&data)?;
+            let item: ItemType = bincode::deserialize::<ItemType>(&data)?;
             info!(
                 "Deleted item with key: {} from keyspace: {}",
                 key,

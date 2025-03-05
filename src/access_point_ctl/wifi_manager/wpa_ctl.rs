@@ -192,11 +192,3 @@ impl WpaCtlClientOps for WpaCtl {
         &self.control_dir
     }
 }
-
-impl Drop for WpaCtl {
-    fn drop(&mut self) {
-        if let Err(e) = fs::remove_dir_all(&self.control_dir) {
-            error!("Failed to remove WPA control directory, error: {}", e);
-        }
-    }
-}

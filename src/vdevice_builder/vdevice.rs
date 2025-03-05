@@ -1,64 +1,103 @@
-use crate::error::Result;
+use std::path::PathBuf;
+
+use super::webrtc_pipeline::WebrtcPipeline;
+use crate::{ble::comm_types::CameraSdp, error::Result};
 use anyhow::anyhow;
-use log::{error, info};
+use log::error;
+use serde::{Deserialize, Serialize};
 use tokio::task;
 use v4l2loopback::{add_device, delete_device, DeviceConfig};
 
-use super::system_utils::{pnp_plug, pnp_unplug};
-
-#[derive(Debug, Clone)]
-pub struct VDevice {
-    pub name: String,
-    pub device_num: u32,
+#[derive(Debug, Serialize, Deserialize)]
+struct Sdp {
+    #[serde(rename = "type")]
+    type_: String,
+    sdp: String,
 }
 
-impl VDevice {
-    pub async fn new(name: String) -> Result<Self> {
+#[derive(Debug)]
+struct V4l2Device {
+    pub num: u32,
+    pub path: PathBuf,
+    pub name: String,
+}
+
+impl V4l2Device {
+    async fn new(name: String) -> Result<Self> {
         let config = DeviceConfig {
             min_width: 100,
             max_width: 4000,
             min_height: 100,
             max_height: 4000,
-            max_buffers: 9,
-            max_openers: 1,
+            max_buffers: 2,
+            max_openers: 9,
             label: name.clone(),
             ..Default::default()
         };
 
-        info!("Adding virtual device with name {}", name);
+        //create the device in a blocking task
+        let name_clone = name.clone();
+        let num = task::spawn_blocking(move || {
+            add_device(None, config).map_err(|e| {
+                error!(
+                    "Failed to add virtual device with name {} error {:?}",
+                    name_clone, e
+                );
+                anyhow!(
+                    "Failed to add virtual device with name {} error {:?}",
+                    name_clone,
+                    e
+                )
+            })
+        })
+        .await??;
 
-        let device_num = match add_device(None, config)
-            .map_err(|e| anyhow!("Failed to add device: {:?}", e))
-        {
-            Ok(num) => num,
-            Err(e) => {
-                // Handle the error from add_device
-                error!("Error adding device: {:?}", e);
-                return Err(e);
-            }
-        };
+        let path = format!("/dev/video{}", num);
 
-        pnp_plug(format!("video{}", device_num)).await?;
-
-        Ok(Self { name, device_num })
+        Ok(Self { name, num, path: PathBuf::from(path) })
     }
 }
 
-impl Drop for VDevice {
+impl Drop for V4l2Device {
     fn drop(&mut self) {
-        if let Err(e) =
-            pnp_unplug(format!("video{}", format!("video{}", self.device_num)))
-        {
-            error!(
-                "Failed to trigger unplug event for virtual device {} with error: {:?}",
-                self.name, e
-            );
-        }
-        if let Err(e) = delete_device(self.device_num) {
+        if let Err(e) = delete_device(self.num) {
             error!(
                 "Failed to remove virtual device {} with error: {:?}",
                 self.name, e
             );
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct VDevice {
+    //_v4l2_device: V4l2Device,
+    webrtc_pipeline: WebrtcPipeline,
+}
+
+impl VDevice {
+    pub async fn new(name: String, camera_offer: CameraSdp) -> Result<Self> {
+        //get he resolution from the camera offer
+        let res_width = camera_offer.format.resolution.0;
+        let res_height = camera_offer.format.resolution.1;
+
+        //        let v4l2_device = V4l2Device::new(name.clone()).await?;
+
+        //create the pipeline in a blocking task
+        let sdp_offer: Sdp = serde_json::from_str(&camera_offer.sdp)?;
+        let video_prop = camera_offer.format.clone();
+
+        //       let device_path_clone = v4l2_device.path.to_string_lossy().to_string();
+        let device_path_clone = "/dev/video0".to_string();
+        let webrtc_pipeline = task::spawn_blocking(move || {
+            WebrtcPipeline::new(device_path_clone, sdp_offer.sdp, video_prop)
+        })
+        .await??;
+
+        Ok(Self { /*_v4l2_device: v4l2_device,*/ webrtc_pipeline })
+    }
+
+    pub fn get_sdp_answer(&self) -> String {
+        self.webrtc_pipeline.get_sdp_answer()
     }
 }

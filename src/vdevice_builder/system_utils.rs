@@ -1,47 +1,10 @@
+use std::path::Path;
+use tokio::io::{AsyncBufReadExt, BufReader};
+
 use crate::error::Result;
 use anyhow::anyhow;
-use log::{error, info};
-use std::io::Write;
-use std::path::Path;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
-
-//utility function to trigger a plug event
-pub async fn pnp_plug(device: String) -> Result<()> {
-    let uevent_path =
-        Path::new(&format!("/sys/class/video4linux/{}", device)).join("uevent");
-
-    if uevent_path.exists() {
-        let mut file = OpenOptions::new().write(true).open(uevent_path).await?;
-
-        file.write_all(b"add").await?;
-
-        info!("Successfully triggered unplug event.");
-    } else {
-        error!("uevent file does not exist.");
-    }
-
-    Ok(())
-}
-
-pub fn pnp_unplug(device: String) -> Result<()> {
-    let uevent_path =
-        Path::new(&format!("/sys/class/video4linux/{}", device)).join("uevent");
-
-    if uevent_path.exists() {
-        let mut file =
-            std::fs::OpenOptions::new().write(true).open(uevent_path)?;
-
-        file.write_all(b"remove")?;
-
-        info!("Successfully triggered unplug event.");
-    } else {
-        error!("uevent file does not exist.");
-    }
-
-    Ok(())
-}
+use log::error;
+use tokio::{fs::File, process::Command};
 
 //utility function to load a kernel module
 pub async fn load_kmodule(
@@ -54,9 +17,9 @@ pub async fn load_kmodule(
         None => cmd.arg(module_name),
     };
 
-    let cmd = cmd.status().await?;
+    let status = cmd.status().await?;
 
-    if cmd.success() {
+    if status.success() {
         Ok(())
     } else {
         error!(
@@ -64,6 +27,21 @@ pub async fn load_kmodule(
             module_name
         );
         Err(anyhow!("Failed to load module"))
+    }
+}
+
+pub async fn update_dir_permissions<P>(dir: P, mode: &str) -> Result<()>
+where
+    P: AsRef<Path>,
+{
+    let status =
+        Command::new("chmod").arg(mode).arg(dir.as_ref()).status().await?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        error!("Failed to update directory permissions");
+        Err(anyhow!("Failed to update directory permissions"))
     }
 }
 
@@ -82,4 +60,24 @@ pub fn unload_kmodule(module_name: &str) -> Result<()> {
         error!("Failed to unload module: {}", module_name);
         Err(anyhow!("Failed to unload module"))
     }
+}
+
+//utility function to check if a kernel module is loaded
+pub async fn is_kmodule_loaded<P>(
+    reg_module_file: P, module_name: &str,
+) -> Result<bool>
+where
+    P: AsRef<Path>,
+{
+    let file = File::open(&reg_module_file).await?;
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        if line.starts_with(module_name) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }

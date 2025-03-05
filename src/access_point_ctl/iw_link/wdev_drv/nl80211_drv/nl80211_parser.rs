@@ -51,12 +51,14 @@ pub fn parse_nl80211_payload(
                 info!("Phy index: {:?}", props.phy_idx);
             }
 
+            //get interface index
             Nl80211Attribute::Ifindex => {
                 props.if_idx =
                     Some(InterfaceIndex(attr.get_payload_as::<u16>()?));
                 info!("Interface index: {:?}", props.if_idx);
             }
 
+            //get software interface types
             Nl80211Attribute::SoftwareIftypes => {
                 //parse the nested attributes
                 let attr_vec: Vec<_> = attr.get_payload_as_with_len::<Vec<Nlattr<Nl80211Iftype, &[u8]>>>()?;

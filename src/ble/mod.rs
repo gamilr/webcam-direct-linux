@@ -1,8 +1,5 @@
-pub mod ble_clients;
-mod ble_cmd_api;
-pub mod ble_server;
-mod mobile_comm;
-
-pub use mobile_comm::{
-    AppDataStore, HostProvInfo, MobileComm, VDeviceBuilderOps, VDeviceMap,
-};
+pub mod api;
+pub mod clients;
+pub mod comm_types;
+pub mod requester;
+pub mod server;

@@ -2,8 +2,9 @@ mod access_point_ctl;
 mod app_data;
 mod ble;
 mod error;
-mod gatt_const;
 mod vdevice_builder;
+
+use tokio::signal;
 
 use access_point_ctl::{
     dhcp_server::{DhcpIpRange, DnsmasqProc},
@@ -18,17 +19,18 @@ use app_data::{AppData, ConnectionType, DiskBasedDb, HostInfo};
 use error::Result;
 
 use ble::{
-    ble_clients::{
+    clients::{
         mobile_prop::MobilePropClient, provisioner::ProvisionerClient,
         sdp_exchanger::SdpExchangerClient,
     },
-    ble_server::BleServer,
-    AppDataStore, MobileComm,
+    server::BleServer,
 };
 use tokio::io::AsyncBufReadExt;
 
 use log::info;
 use vdevice_builder::VDeviceBuilder;
+
+use crate::ble::server::mobile_comm::{AppDataStore, MobileComm};
 
 fn setup_access_point() -> Result<impl AccessPointCtl> {
     let if_name = "wcdirect0";
@@ -106,26 +108,29 @@ async fn main() -> Result<()> {
 
     let _provisioner = ProvisionerClient::new(
         adapter.clone(),
-        ble_server.connection(),
+        ble_server.get_requester(),
         host_prov_info.name.clone(),
     );
 
     let _mobile_prop_client =
-        MobilePropClient::new(adapter.clone(), ble_server.connection());
+        MobilePropClient::new(adapter.clone(), ble_server.get_requester());
 
     let _sdp_exchanger = SdpExchangerClient::new(
         adapter.clone(),
-        ble_server.connection(),
+        ble_server.get_requester(),
         host_prov_info.name.clone(),
         host_prov_info.id,
     );
 
-    info!("Service ready. Press enter to quit.");
-    let stdin = tokio::io::BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
-    let _ = lines.next_line().await;
+    info!("Press any key or Ctrl-C to stop the process");
 
-    info!("webcam direct stopped stopped");
+    tokio::select! {
+      _ = signal::ctrl_c() => {
+        info!("Received Ctrl-C, shutting down.");
+      }
+    }
+
+    info!("webcam direct process stopped");
 
     Ok(())
 }
