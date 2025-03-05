@@ -8,13 +8,13 @@ use std::io::Cursor;
 
 use anyhow::Result;
 
-pub fn serialize<T: Serialize>(data: &T) -> Result<Vec<u8>> {
+pub fn msgpack_ser<T: Serialize>(data: &T) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     data.serialize(&mut rmp_serde::Serializer::new(&mut buf))?;
     Ok(buf)
 }
 
-pub fn deserialize<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<T> {
+pub fn msgpack_des<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<T> {
     let mut de_data = rmp_serde::Deserializer::new(Cursor::new(data));
     T::deserialize(&mut de_data)
         .map_err(|e| anyhow!("Failed to deserialize data: {}", e))
@@ -34,7 +34,7 @@ impl TryFrom<Vec<u8>> for DataChunk {
     type Error = anyhow::Error;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        deserialize(&bytes)
+        msgpack_des(&bytes)
     }
 }
 
@@ -42,7 +42,7 @@ impl TryFrom<DataChunk> for Vec<u8> {
     type Error = anyhow::Error;
 
     fn try_from(data: DataChunk) -> Result<Self, Self::Error> {
-        serialize(&data)
+        msgpack_ser(&data)
     }
 }
 
@@ -54,62 +54,11 @@ pub struct VideoProp {
     pub fps: u32,
 }
 
-impl TryFrom<&[u8]> for VideoProp {
-    type Error = anyhow::Error;
-
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        deserialize(bytes)
-    }
-}
-
-impl TryFrom<VideoProp> for Vec<u8> {
-    type Error = anyhow::Error;
-
-    fn try_from(data: VideoProp) -> Result<Self, Self::Error> {
-        serialize(&data)
-    }
-}
-
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CameraSdp {
     pub name: String,
     pub format: VideoProp,
     pub sdp: String,
-}
-
-impl TryFrom<Vec<u8>> for CameraSdp {
-    type Error = anyhow::Error;
-
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        deserialize(&bytes)
-    }
-}
-
-impl TryFrom<CameraSdp> for Vec<u8> {
-    type Error = anyhow::Error;
-
-    fn try_from(data: CameraSdp) -> Result<Self, Self::Error> {
-        serialize(&data)
-    }
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct CameraSdpList(pub Vec<CameraSdp>);
-
-impl TryFrom<Vec<u8>> for CameraSdpList {
-    type Error = anyhow::Error;
-
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        deserialize(&bytes)
-    }
-}
-
-impl TryFrom<CameraSdpList> for Vec<u8> {
-    type Error = anyhow::Error;
-
-    fn try_from(data: CameraSdpList) -> Result<Self, Self::Error> {
-        serialize(&data)
-    }
 }
 
 /// Mobile Sdp Offer will be sent to the host to establish the connection
@@ -123,7 +72,7 @@ impl TryFrom<Vec<u8>> for MobileSdpOffer {
     type Error = anyhow::Error;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        deserialize(&bytes)
+        msgpack_des(&bytes)
     }
 }
 
@@ -131,7 +80,7 @@ impl TryFrom<MobileSdpOffer> for Vec<u8> {
     type Error = anyhow::Error;
 
     fn try_from(data: MobileSdpOffer) -> Result<Self, Self::Error> {
-        serialize(&data)
+        msgpack_ser(&data)
     }
 }
 
@@ -141,11 +90,11 @@ pub struct MobileSdpAnswer {
     pub camera_answer: Vec<CameraSdp>,
 }
 
-impl TryFrom<&[u8]> for MobileSdpAnswer {
+impl TryFrom<Vec<u8>> for MobileSdpAnswer {
     type Error = anyhow::Error;
 
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        deserialize(bytes)
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        msgpack_des(&bytes)
     }
 }
 
@@ -153,7 +102,7 @@ impl TryFrom<MobileSdpAnswer> for Vec<u8> {
     type Error = anyhow::Error;
 
     fn try_from(data: MobileSdpAnswer) -> Result<Self, Self::Error> {
-        serialize(&data)
+        msgpack_ser(&data)
     }
 }
 
@@ -169,7 +118,7 @@ impl TryFrom<Vec<u8>> for HostProvInfo {
     type Error = anyhow::Error;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        deserialize(&bytes)
+        msgpack_des(&bytes)
     }
 }
 
@@ -177,7 +126,7 @@ impl TryFrom<HostProvInfo> for Vec<u8> {
     type Error = anyhow::Error;
 
     fn try_from(data: HostProvInfo) -> Result<Self, Self::Error> {
-        serialize(&data)
+        msgpack_ser(&data)
     }
 }
 
@@ -191,7 +140,7 @@ impl TryFrom<&[u8]> for SdpAnswerReady {
     type Error = anyhow::Error;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        deserialize(bytes)
+        msgpack_des(bytes)
     }
 }
 
@@ -199,7 +148,7 @@ impl TryFrom<SdpAnswerReady> for Vec<u8> {
     type Error = anyhow::Error;
 
     fn try_from(data: SdpAnswerReady) -> Result<Self, Self::Error> {
-        serialize(&data)
+        msgpack_ser(&data)
     }
 }
 
@@ -208,7 +157,7 @@ impl TryFrom<Vec<u8>> for MobileSchema {
     type Error = anyhow::Error;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        deserialize(&bytes)
+        msgpack_des(&bytes)
     }
 }
 
@@ -216,6 +165,6 @@ impl TryFrom<MobileSchema> for Vec<u8> {
     type Error = anyhow::Error;
 
     fn try_from(data: MobileSchema) -> Result<Self, Self::Error> {
-        serialize(&data)
+        msgpack_ser(&data)
     }
 }

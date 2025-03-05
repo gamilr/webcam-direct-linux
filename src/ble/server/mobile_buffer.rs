@@ -217,13 +217,15 @@ impl MobileBufferMap {
         Ok(None)
     }
 }
-/*
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
     use env_logger;
     use log::{debug, info};
+
+    const CHUNK_LEN: usize = 5;
 
     fn init_test() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -232,75 +234,66 @@ mod tests {
     #[test]
     fn test_remove_mobile() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "00:11:22:33:44:55";
 
-        buffer_map.add_mobile(addr);
-        assert!(buffer_map.contains_mobile(addr));
+        buffer_map.mobile_buffer_status.insert(
+            addr.to_string(),
+            BufferCursor { writer: HashMap::new(), reader: HashMap::new() },
+        );
 
         buffer_map.remove_mobile(addr);
-        assert!(!buffer_map.contains_mobile(addr));
-    }
 
-    #[test]
-    fn test_contains_mobile() {
-        init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
-        buffer_map.add_mobile("00:11:22:33:44:55");
-
-        assert!(buffer_map.contains_mobile("00:11:22:33:44:55"));
-
-        assert!(!buffer_map.contains_mobile("FF:EE:DD:CC:BB:AA"));
-
-        buffer_map.remove_mobile("00:11:22:33:44:55");
-        assert!(!buffer_map.contains_mobile("00:11:22:33:44:55"));
+        assert!(!buffer_map.mobile_buffer_status.contains_key(addr));
     }
 
     #[test]
     fn test_get_next_data_chunk_simple_data() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "AA:BB:CC:DD:EE:FF";
 
-        let data = "A".repeat(100); // Simple data
-        let query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
+        let expected_len = 100;
+        let allowed_data_len = 100 - CHUNK_LEN;
+        let data = vec![55; allowed_data_len]; // Simple data
+        let query = QueryReq {
+            query_type: QueryApi::HostInfo,
+            resp_buffer_len: expected_len,
+        };
 
-        let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
-
-        assert_eq!(chunk.r, 0);
-        assert_eq!(chunk.d.len(), 100);
-    }
-
-    #[test]
-    fn test_get_next_data_chunk_simple_data_multiple_queries() {
-        init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
-        let addr = "AA:BB:CC:DD:EE:FF";
-
-        let data = "A".repeat(100); // Simple data
-        let query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
-
-        let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
+        let chunk: DataChunk = buffer_map
+            .get_next_data_chunk(addr, &query, &data)
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(chunk.r, 0);
-        assert_eq!(chunk.d.len(), 100);
+        assert_eq!(chunk.d.len(), allowed_data_len);
     }
 
     #[test]
     fn test_get_next_data_chunk_large_data() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "AA:BB:CC:DD:EE:FF";
 
-        let data = "A".repeat(5000); // Large data
+        let expected_len = 5000;
+        let data = vec![55; expected_len]; // Large data
+        let resp_buffer_len = 1024;
         let query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 1024 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+
+        let allowed_data_len = resp_buffer_len - CHUNK_LEN;
+
         let mut chunks = Vec::new();
 
         loop {
-            let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
+            let chunk: DataChunk = buffer_map
+                .get_next_data_chunk(addr, &query, &data)
+                .unwrap()
+                .try_into()
+                .unwrap();
+
             chunks.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -309,25 +302,26 @@ mod tests {
 
         //test partial chunks
         assert_eq!(chunks.len(), 5);
-        assert_eq!(chunks[0].d.len(), 1024); //5000 - 1024 = 3976
-        assert_eq!(chunks[0].r, 3976);
-        assert_eq!(chunks[1].d.len(), 1024); // 3976 - 1024 = 2952
-        assert_eq!(chunks[1].r, 2952);
-        assert_eq!(chunks[2].d.len(), 1024); // 2952 - 1024 = 1928
-        assert_eq!(chunks[2].r, 1928);
-        assert_eq!(chunks[3].d.len(), 1024); // 1928 - 1024 = 904
-        assert_eq!(chunks[3].r, 904);
-        assert_eq!(chunks[4].d.len(), 904); // 904 - 904 = 0
+        assert_eq!(chunks[0].d.len(), allowed_data_len); //5000 - 1024 + CHUNK_LEN = 3981
+        assert_eq!(chunks[0].r, 3981);
+        assert_eq!(chunks[1].d.len(), allowed_data_len); // 3971 - 1024 + CHUNK_LEN = 2962
+        assert_eq!(chunks[1].r, 2962);
+        assert_eq!(chunks[2].d.len(), allowed_data_len); // 2952 - 1024 + CHUNK_LEN = 1943
+        assert_eq!(chunks[2].r, 1943);
+        assert_eq!(chunks[3].d.len(), allowed_data_len); // 1928 - 1024 + CHUNK_LEN= 924
+        assert_eq!(chunks[3].r, 924);
+        assert_eq!(chunks[4].d.len(), 924); // 0
         assert_eq!(chunks[4].r, 0);
     }
 
     #[test]
     fn test_get_next_data_chunk_large_data_changing_max_buffer() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "AA:BB:CC:DD:EE:FF";
 
-        let data = "A".repeat(300); // Large data
+        let expected_len = 300;
+        let data = vec![55; expected_len]; // Large data
         let mut chunks = Vec::new();
 
         let mut max_buffer_len = 15;
@@ -336,7 +330,11 @@ mod tests {
             resp_buffer_len: max_buffer_len,
         };
         loop {
-            let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
+            let chunk: DataChunk = buffer_map
+                .get_next_data_chunk(addr, &query, &data)
+                .unwrap()
+                .try_into()
+                .unwrap();
             chunks.push(chunk.clone());
             debug!("Chunk: {:?}", chunk);
             if chunk.r == 0 {
@@ -352,16 +350,27 @@ mod tests {
     #[test]
     fn test_get_next_data_chunk_large_data_twice() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "AA:BB:CC:DD:EE:FF";
 
-        let data = "A".repeat(300); // Large data
+        let expected_len = 300;
+        let data = vec![55; expected_len]; // Large data
+
+        let resp_buffer_len = 15;
+
         let query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 15 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+
+        let allowed_data_len = resp_buffer_len - CHUNK_LEN;
+
         let mut chunks = Vec::new();
 
         loop {
-            let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
+            let chunk: DataChunk = buffer_map
+                .get_next_data_chunk(addr, &query, &data)
+                .unwrap()
+                .try_into()
+                .unwrap();
             chunks.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -369,17 +378,25 @@ mod tests {
         }
 
         //test partial chunks
-        assert_eq!(chunks.len(), 20);
-        assert_eq!(chunks[0].d.len(), 15); //300 - 15 = 285
-        assert_eq!(chunks[0].r, 285);
-        assert_eq!(chunks[19].d.len(), 15);
-        assert_eq!(chunks[19].r, 0);
+        assert_eq!(chunks.len(), 30);
+        assert_eq!(chunks[0].d.len(), allowed_data_len);
+        assert_eq!(chunks[0].r, 290);
+        assert_eq!(chunks[29].d.len(), allowed_data_len);
+        assert_eq!(chunks[29].r, 0);
 
         //start again
+        chunks = Vec::new();
+        let resp_buffer_len = 13;
         let new_query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 13 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+
+        let allowed_data_len = resp_buffer_len - CHUNK_LEN;
         loop {
-            let chunk = buffer_map.get_next_data_chunk(addr, &new_query, &data);
+            let chunk: DataChunk = buffer_map
+                .get_next_data_chunk(addr, &new_query, &data)
+                .unwrap()
+                .try_into()
+                .unwrap();
             chunks.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -387,46 +404,65 @@ mod tests {
         }
 
         //test partial chunks
-        assert_eq!(chunks.len(), 44);
-        assert_eq!(chunks[20].d.len(), 13); //300 - 13 = 287
-        assert_eq!(chunks[20].r, 287);
-        assert_eq!(chunks[43].d.len(), 1);
-        assert_eq!(chunks[43].r, 0);
+        assert_eq!(chunks.len(), 38);
+        assert_eq!(chunks[0].d.len(), allowed_data_len);
+        assert_eq!(chunks[0].r, 292); // 300 - 13 + CHUNK_LEN = 292
+        assert_eq!(chunks[37].d.len(), 4);
+        assert_eq!(chunks[37].r, 0);
     }
 
     #[test]
     fn test_get_complete_buffer_simple_data() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "11:22:33:44:55:66";
 
-        let data = "B".repeat(100); // Large data
-        let query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
+        let expected_len = 100;
+        let allowed_data_len = 100 - CHUNK_LEN;
+        let data = vec![55; allowed_data_len]; // Large data
+        let query = QueryReq {
+            query_type: QueryApi::HostInfo,
+            resp_buffer_len: expected_len,
+        };
 
-        let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
+        let chunk: DataChunk = buffer_map
+            .get_next_data_chunk(addr, &query, &data)
+            .unwrap()
+            .try_into()
+            .unwrap();
+
         assert_eq!(chunk.r, 0);
 
-        let cmd =
-            CommandReq { cmd_type: CmdApi::MobileDisconnected, payload: chunk };
-        if let Some(buffer) = buffer_map.get_complete_buffer(addr, &cmd) {
-            assert_eq!(buffer.len(), 100);
+        let cmd = CommandReq {
+            cmd_type: CmdApi::MobileDisconnected,
+            payload: chunk.try_into().unwrap(),
+        };
+
+        if let Some(buffer) =
+            buffer_map.get_complete_buffer(addr, &cmd).unwrap()
+        {
+            assert_eq!(buffer.len(), allowed_data_len);
         }
     }
 
     #[test]
     fn test_get_complete_buffer_large_data() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "11:22:33:44:55:66";
 
-        let data = "B".repeat(3355); // Large data
+        let expected_len = 3355;
+        let data = vec![55; expected_len]; // Large data
         let query =
             QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 512 };
         let mut chunks = Vec::new();
 
         loop {
-            let chunk = buffer_map.get_next_data_chunk(addr, &query, &data);
+            let chunk: DataChunk = buffer_map
+                .get_next_data_chunk(addr, &query, &data)
+                .unwrap()
+                .try_into()
+                .unwrap();
             chunks.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -437,10 +473,12 @@ mod tests {
         while indx <= chunks.len() {
             let cmd = CommandReq {
                 cmd_type: CmdApi::MobileDisconnected,
-                payload: chunks[indx].clone(),
+                payload: chunks[indx].clone().try_into().unwrap(),
             };
-            if let Some(buffer) = buffer_map.get_complete_buffer(addr, &cmd) {
-                assert_eq!(buffer.len(), 3355);
+            if let Some(buffer) =
+                buffer_map.get_complete_buffer(addr, &cmd).unwrap()
+            {
+                assert_eq!(buffer.len(), expected_len);
                 break;
             }
             info!("Buffer not ready yet");
@@ -451,23 +489,31 @@ mod tests {
     #[test]
     fn test_multiple_device_in_parallel_communication() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr1 = "AA:BB:CC:DD:EE:FF";
         let addr2 = "11:22:33:44:55:66";
 
-        let data1 = "A".repeat(1000);
-        let data2 = "B".repeat(1000);
+        let expected_len = 1000;
+        let data1 = vec![55; expected_len]; // Large data
+        let data2 = vec![66; expected_len]; // Large data
 
+        let resp_buffer_len = 100 + CHUNK_LEN;
         let query1 =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
         let query2 =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 100 };
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+
+        let allowed_data_len = resp_buffer_len - CHUNK_LEN;
 
         let mut chunks1 = Vec::new();
         let mut chunks2 = Vec::new();
 
         loop {
-            let chunk = buffer_map.get_next_data_chunk(addr1, &query1, &data1);
+            let chunk: DataChunk = buffer_map
+                .get_next_data_chunk(addr1, &query1, &data1)
+                .unwrap()
+                .try_into()
+                .unwrap();
             chunks1.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -475,7 +521,11 @@ mod tests {
         }
 
         loop {
-            let chunk = buffer_map.get_next_data_chunk(addr2, &query2, &data2);
+            let chunk: DataChunk = buffer_map
+                .get_next_data_chunk(addr2, &query2, &data2)
+                .unwrap()
+                .try_into()
+                .unwrap();
             chunks2.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -483,50 +533,55 @@ mod tests {
         }
 
         // Check that both channels have received the correct number of chunks
-        assert_eq!(chunks1.len(), 10); // 1000 / 100 = 10
-        assert_eq!(chunks2.len(), 10); // 1000 / 100 = 10
+        assert_eq!(chunks1.len(), expected_len / allowed_data_len); // 1000 / 100 = 10
+        assert_eq!(chunks2.len(), expected_len / allowed_data_len); // 1000 / 100 = 10
 
         // Check that the data in the chunks is correct
         for chunk in chunks1 {
-            assert_eq!(chunk.d, "A".repeat(100));
+            assert_eq!(chunk.d, vec![55; allowed_data_len]);
         }
 
         for chunk in chunks2 {
-            assert_eq!(chunk.d, "B".repeat(100));
+            assert_eq!(chunk.d, vec![66; allowed_data_len]);
         }
     }
 
     #[test]
     fn test_single_device_single_parallel_communication() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "AA:BB:CC:DD:EE:FF";
 
-        let data1 = "A".repeat(500);
-        let data2 = "B".repeat(500);
+        let expected_len = 500;
+        let data1 = vec![55; expected_len]; // Large data
+        let data2 = vec![66; expected_len]; // Large data
 
         let cmd1 = CommandReq {
             cmd_type: CmdApi::MobileDisconnected,
-            payload: DataChunk { r: 0, d: data1.clone() },
+            payload: DataChunk { r: 0, d: data1.clone() }.try_into().unwrap(),
         };
 
         let cmd2 = CommandReq {
             cmd_type: CmdApi::RegisterMobile,
-            payload: DataChunk { r: 0, d: data2.clone() },
+            payload: DataChunk { r: 0, d: data2.clone() }.try_into().unwrap(),
         };
 
-        let mut buffer1 = String::new();
-        let mut buffer2 = String::new();
+        let mut buffer1 = Vec::new();
+        let mut buffer2 = Vec::new();
 
-        while let Some(chunk) = buffer_map.get_complete_buffer(addr, &cmd1) {
-            buffer1.push_str(&chunk);
+        while let Some(chunk) =
+            buffer_map.get_complete_buffer(addr, &cmd1).unwrap()
+        {
+            buffer1.extend_from_slice(&chunk);
             if buffer1.len() >= data1.len() {
                 break;
             }
         }
 
-        while let Some(chunk) = buffer_map.get_complete_buffer(addr, &cmd2) {
-            buffer2.push_str(&chunk);
+        while let Some(chunk) =
+            buffer_map.get_complete_buffer(addr, &cmd2).unwrap()
+        {
+            buffer2.extend_from_slice(&chunk);
             if buffer2.len() >= data2.len() {
                 break;
             }
@@ -540,12 +595,13 @@ mod tests {
     #[test]
     fn test_single_device_multiple_parallel_communication() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(5000);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "AA:BB:CC:DD:EE:FF";
 
         // prepare the data and fill up the chunks
-        let data1 = "A".repeat(500);
-        let data2 = "B".repeat(500);
+        let expected_len = 500;
+        let data1 = vec![55; expected_len]; // Large data
+        let data2 = vec![66; expected_len]; // Large data
 
         let mut chunks1 = Vec::new();
         let mut chunks2 = Vec::new();
@@ -553,17 +609,17 @@ mod tests {
         let mut start_chunk = 0;
         let chunk_len = 100;
 
-        while start_chunk <= 500 - chunk_len {
+        while start_chunk <= expected_len - chunk_len {
             let end_chunk = start_chunk + chunk_len;
 
             chunks1.push(DataChunk {
-                r: 500 - end_chunk,
-                d: data1[start_chunk..end_chunk].to_string(),
+                r: expected_len - end_chunk,
+                d: data1[start_chunk..end_chunk].to_owned(),
             });
 
             chunks2.push(DataChunk {
-                r: 500 - end_chunk,
-                d: data2[start_chunk..end_chunk].to_string(),
+                r: expected_len - end_chunk,
+                d: data2[start_chunk..end_chunk].to_owned(),
             });
 
             start_chunk = end_chunk;
@@ -577,21 +633,25 @@ mod tests {
         {
             let cmd = CommandReq {
                 cmd_type: CmdApi::RegisterMobile,
-                payload: chunk1.clone(),
+                payload: chunk1.clone().try_into().unwrap(),
             };
 
-            if let Some(buffer1) = buffer_map.get_complete_buffer(addr, &cmd) {
-                assert_eq!(buffer1.len(), 500);
+            if let Some(buffer1) =
+                buffer_map.get_complete_buffer(addr, &cmd).unwrap()
+            {
+                assert_eq!(buffer1.len(), expected_len);
                 assert_eq!(buffer1, data1);
             }
 
             let cmd = CommandReq {
                 cmd_type: CmdApi::SdpOffer,
-                payload: chunk2.clone(),
+                payload: chunk2.clone().try_into().unwrap(),
             };
 
-            if let Some(buffer2) = buffer_map.get_complete_buffer(addr, &cmd) {
-                assert_eq!(buffer2.len(), 500);
+            if let Some(buffer2) =
+                buffer_map.get_complete_buffer(addr, &cmd).unwrap()
+            {
+                assert_eq!(buffer2.len(), expected_len);
                 assert_eq!(buffer2, data2);
             }
         }
@@ -600,20 +660,19 @@ mod tests {
     #[test]
     fn test_maximum_buffer_size() {
         init_test();
-        let mut buffer_map = MobileBufferMap::new(9999);
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
         let addr = "AA:BB:CC:DD:EE:FF";
 
-        let data = "A".repeat(10000); // Large data
-                                      //
+        let expected_len = 5001;
+        let data = vec![55; expected_len]; // Large data
+                                           //
         let cmd = CommandReq {
             cmd_type: CmdApi::MobileDisconnected,
-            payload: DataChunk { r: 0, d: data.clone() },
+            payload: DataChunk { r: 0, d: data.clone() }.try_into().unwrap(),
         };
 
-        let buffer = buffer_map.get_complete_buffer(addr, &cmd);
+        let buffer = buffer_map.get_complete_buffer(addr, &cmd).unwrap();
 
         assert!(buffer.is_none());
     }
 }
-
-*/

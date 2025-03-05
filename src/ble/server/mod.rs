@@ -7,9 +7,9 @@ use mobile_buffer::MobileBufferMap;
 
 use super::{
     api::{CommBuffer, MAX_BUFFER_LEN},
-    comm_types::{CameraSdp, DataChunk, HostProvInfo, MobileSdpOffer},
+    comm_types::{DataChunk, HostProvInfo, MobileSdpAnswer, MobileSdpOffer},
 };
-use crate::{app_data::MobileSchema, ble::comm_types::CameraSdpList};
+use crate::app_data::MobileSchema;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -48,7 +48,8 @@ pub trait CommDataService: Send + Sync + 'static {
         &mut self, addr: String, publisher: BlePublisher,
     ) -> Result<()>;
 
-    async fn get_sdp_answer(&mut self, addr: String) -> Result<Vec<CameraSdp>>;
+    async fn get_sdp_answer(&mut self, addr: String)
+        -> Result<MobileSdpAnswer>;
 
     //disconnected device
     async fn mobile_disconnected(&mut self, addr: String) -> Result<()>;
@@ -149,15 +150,18 @@ impl BleServerCommHandler {
 
                     self.server_data_cache.host_info = Some(host_info.clone());
                 }
-                self.server_data_cache.host_info.as_ref().unwrap()
+                self.server_data_cache
+                    .host_info
+                    .as_ref()
+                    .ok_or(anyhow!("Host info not found"))?
             }
 
             QueryApi::SdpAnswer => {
                 if self.server_data_cache.sdp_answer.get(&addr).is_none() {
-                    let sdp_answer: Vec<u8> = CameraSdpList(
-                        comm_handler.get_sdp_answer(addr.clone()).await?,
-                    )
-                    .try_into()?;
+                    let sdp_answer: Vec<u8> = comm_handler
+                        .get_sdp_answer(addr.clone())
+                        .await?
+                        .try_into()?;
 
                     self.server_data_cache
                         .sdp_answer
@@ -167,9 +171,9 @@ impl BleServerCommHandler {
                 self.server_data_cache
                     .sdp_answer
                     .get(&addr)
-                    .unwrap()
+                    .ok_or(anyhow!("SDP answer not found"))?
                     .as_ref()
-                    .unwrap()
+                    .ok_or(anyhow!("SDP answer not found"))?
             }
         };
 
@@ -193,6 +197,7 @@ impl BleServerCommHandler {
 
         match cmd.cmd_type {
             CmdApi::MobileDisconnected => {
+                //clean up the device resources
                 self.buffer_map.remove_mobile(&addr);
                 self.server_data_cache.sdp_answer.remove(&addr);
                 comm_handler.mobile_disconnected(addr).await

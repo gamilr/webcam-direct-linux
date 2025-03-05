@@ -1,4 +1,7 @@
-use crate::app_data::MobileSchema;
+use crate::{
+    app_data::MobileSchema,
+    ble::comm_types::{MobileSdpAnswer, SdpAnswerReady},
+};
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -21,18 +24,8 @@ use mockall::automock;
 /// A trait that defines the operations for interacting with the application's data store.
 #[cfg_attr(test, automock)]
 pub trait AppDataStore: Send + Sync + 'static {
-    /// Retrieves the host provisioning info  from the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
     fn get_host_prov_info(&self) -> Result<HostProvInfo>;
 
-    /// Adds a mobile device to the data store.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the host information is not found in the data store.
     fn add_mobile(&mut self, mobile: &MobileSchema) -> Result<()>;
 
     fn get_mobile(&self, id: &str) -> Result<MobileSchema>;
@@ -41,7 +34,7 @@ pub trait AppDataStore: Send + Sync + 'static {
 pub type VDeviceMap = HashMap<String, VDevice>;
 
 #[derive(Default)]
-pub struct VDeviceInfo {
+pub struct DeviceInfo {
     publisher: Option<BlePublisher>,
     vdevices: VDeviceMap,
 }
@@ -59,7 +52,7 @@ pub struct MobileComm<Db, VDevBuilder> {
     db: Db,
 
     //virtual devices
-    mobiles_connected: HashMap<Address, VDeviceInfo>,
+    mobiles_connected: HashMap<Address, DeviceInfo>,
 
     //virtual device builder
     vdev_builder: VDevBuilder,
@@ -102,10 +95,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
         //add the publisher to for this mobile
         self.mobiles_connected.insert(
             addr,
-            VDeviceInfo {
-                publisher: Some(publisher),
-                vdevices: HashMap::new(),
-            },
+            DeviceInfo { publisher: Some(publisher), vdevices: HashMap::new() },
         );
 
         Ok(())
@@ -131,7 +121,9 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
                     .await?;
 
                 //notify the mobile the SDP answer are ready
-                publisher.publish(addr.to_string().into()).await?;
+                publisher
+                    .publish(SdpAnswerReady { mobile_id }.try_into()?)
+                    .await?;
             } else {
                 return Err(anyhow!("Publisher not found for mobile"));
             }
@@ -144,7 +136,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
 
     async fn get_sdp_answer(
         &mut self, addr: Address,
-    ) -> Result<Vec<CameraSdp>> {
+    ) -> Result<MobileSdpAnswer> {
         debug!("SDP answer requested by: {:?}", addr);
 
         let vdevice_info = self
@@ -152,7 +144,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
             .get_mut(&addr)
             .ok_or_else(|| anyhow!("Mobile not found in connected devices"))?;
 
-        Ok(vdevice_info
+        let camera_answer = vdevice_info
             .vdevices
             .iter()
             .map(|(name, vdevice)| CameraSdp {
@@ -160,7 +152,9 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
                 format: VideoProp::default(),
                 sdp: vdevice.get_sdp_answer().clone(),
             })
-            .collect::<Vec<CameraSdp>>())
+            .collect::<Vec<CameraSdp>>();
+
+        Ok(MobileSdpAnswer { camera_answer })
     }
 
     //disconnect the mobile device
