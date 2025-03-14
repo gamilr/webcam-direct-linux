@@ -56,7 +56,7 @@ sudo apt install libdbus-1-dev \
 
 1. Clone the repository:
    ```sh
-   git clone https://github.com/yourusername/webcam-direct-linux.git
+   git clone https://github.com/gamilr/webcam-direct-linux
    ```
 2. Navigate to the project directory:
    ```sh
