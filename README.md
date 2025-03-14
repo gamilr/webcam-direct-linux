@@ -52,7 +52,7 @@ sudo apt install libdbus-1-dev \
                              gstreamer1.0-nice
 ```
 
-### Installation
+### Build
 
 1. Clone the repository:
    ```sh
