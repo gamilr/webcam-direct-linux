@@ -1,3 +1,17 @@
+
+<p align="center">
+<picture>
+  <!-- Use the dark version if the user’s device or browser is set to dark mode -->
+  <source srcset="https://github.com/user-attachments/assets/77253dda-5ed4-4aa0-aef5-c353aef1ccd9" media="(prefers-color-scheme: dark)"  width="200" margin="0"/>
+  <!-- Fallback for light mode (or if no dark mode is detected) -->
+  <source srcset="https://github.com/user-attachments/assets/123d7cc3-3658-4dab-95a9-a2c9cff5a471" media="(prefers-color-scheme: light)" width="200"  margin="0"/>
+  <!-- In case neither condition is met -->
+  <img src="https://github.com/user-attachments/assets/123d7cc3-3658-4dab-95a9-a2c9cff5a471" alt="Example image"  width="200" margin="0"/>
+</picture>
+</p>
+
+#
+
 # Webcam Direct Linux
 
 This project is a Rust-based application that allows you to use your personal mobile as a webcam for your computer. It is inspired by the Apple Continuity feature but does not require iCloud. The provisioning process is done using BLE, and the application uses WebRTC for real-time video and audio streaming. The media processing and streaming are handled by GStreamer, and a virtual webcam device is created using v4l2loopback. The application also supports multiple cameras.
