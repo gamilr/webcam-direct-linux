@@ -1,4 +1,4 @@
-max_width = 80
+max_width = 100
 use_small_heuristics = "Max"
 fn_params_layout = "Compressed"
 imports_granularity = "Crate"

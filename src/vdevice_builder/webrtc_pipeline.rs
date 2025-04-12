@@ -20,9 +20,7 @@ pub struct WebrtcPipeline {
 }
 
 impl WebrtcPipeline {
-    pub fn new(
-        vdevice: String, sdp_offer: String, video_prop: VideoProp,
-    ) -> Result<Self> {
+    pub fn new(vdevice: String, sdp_offer: String, video_prop: VideoProp) -> Result<Self> {
         let mainloop = glib::MainLoop::new(None, false);
 
         let (tx, rx) = mpsc::channel();
@@ -32,13 +30,7 @@ impl WebrtcPipeline {
         info!("Creating pipeline thread");
 
         let pipeline_thread = thread::spawn(move || {
-            match create_pipeline(
-                mainloop_clone,
-                vdevice,
-                sdp_offer,
-                tx,
-                video_prop,
-            ) {
+            match create_pipeline(mainloop_clone, vdevice, sdp_offer, tx, video_prop) {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     error!("Failed to create pipeline: {:?}", e);
@@ -52,11 +44,7 @@ impl WebrtcPipeline {
             return Err(anyhow!("Failed to get sdp answer"));
         };
 
-        Ok(WebrtcPipeline {
-            mainloop,
-            pipeline_thread: Some(pipeline_thread),
-            sdp_answer,
-        })
+        Ok(WebrtcPipeline { mainloop, pipeline_thread: Some(pipeline_thread), sdp_answer })
     }
 
     pub fn get_sdp_answer(&self) -> String {
@@ -78,8 +66,8 @@ impl Drop for WebrtcPipeline {
 
 //create the gstreamer pipeline
 fn create_pipeline(
-    main_loop: glib::MainLoop, vdevice: String, sdp_offer: String,
-    tx: mpsc::Sender<String>, video_prop: VideoProp,
+    main_loop: glib::MainLoop, vdevice: String, sdp_offer: String, tx: mpsc::Sender<String>,
+    video_prop: VideoProp,
 ) -> Result<()> {
     gst::init()?;
 
@@ -130,9 +118,8 @@ fn create_pipeline(
         .map_err(|e| anyhow!("Failed to create v4l2 device: {:?}", e))?;
 
     //set NV12 format and resolution 540x960
-    let mut format = v4l_dev
-        .format()
-        .map_err(|e| anyhow!("Failed to get v4l2 device format: {:?}", e))?;
+    let mut format =
+        v4l_dev.format().map_err(|e| anyhow!("Failed to get v4l2 device format: {:?}", e))?;
     info!("v4l2 format: {:?}", format);
 
     format.fourcc = FourCC::new(b"NV12");
@@ -144,9 +131,8 @@ fn create_pipeline(
         .map_err(|e| anyhow!("Failed to set v4l2 device format: {:?}", e))?;
 
     //read the format again
-    let format = v4l_dev
-        .format()
-        .map_err(|e| anyhow!("Failed to get v4l2 device format: {:?}", e))?;
+    let format =
+        v4l_dev.format().map_err(|e| anyhow!("Failed to get v4l2 device format: {:?}", e))?;
 
     info!("v4l2 format after configured: {:?}", format);
 
@@ -269,9 +255,7 @@ fn create_pipeline(
             return None;
         };
 
-        let Some(caps) =
-            new_pad.current_caps().or_else(|| new_pad.allowed_caps())
-        else {
+        let Some(caps) = new_pad.current_caps().or_else(|| new_pad.allowed_caps()) else {
             error!("Failed to get caps from new pad");
             return None;
         };
@@ -306,11 +290,10 @@ fn create_pipeline(
         None
     });
 
-    webrtcbin
-        .connect("on-negotiation-needed", false, move |_values| {
-            info!("Negotiation needed signal received (waiting for an external offer)...");
-            None
-        });
+    webrtcbin.connect("on-negotiation-needed", false, move |_values| {
+        info!("Negotiation needed signal received (waiting for an external offer)...");
+        None
+    });
 
     webrtcbin.connect("on-ice-candidate", false, move |values| {
         let Ok(_) = values[0].get::<gst::Element>() else {
@@ -328,47 +311,37 @@ fn create_pipeline(
             return None;
         };
 
-        info!(
-            "New ICE candidate gathered (mline index {}): {}",
-            mlineindex, candidate
-        );
+        info!("New ICE candidate gathered (mline index {}): {}", mlineindex, candidate);
         None
     });
 
     let webrtcbin_clone = webrtcbin.clone();
     let tx_clone = tx.clone();
 
-    webrtcbin.connect_notify(
-        Some("ice-gathering-state"),
-        move |webrtc, _pspec| {
-            info!("ICE gathering state changed");
-            let webrtcbin_clone = webrtcbin_clone.clone();
-            let tx_clone = tx_clone.clone();
-            let state = webrtc.property::<gst_webrtc::WebRTCICEGatheringState>(
-                "ice-gathering-state",
-            );
+    webrtcbin.connect_notify(Some("ice-gathering-state"), move |webrtc, _pspec| {
+        info!("ICE gathering state changed");
+        let webrtcbin_clone = webrtcbin_clone.clone();
+        let tx_clone = tx_clone.clone();
+        let state = webrtc.property::<gst_webrtc::WebRTCICEGatheringState>("ice-gathering-state");
 
-            info!("ICE gathering state changed: {:?}", state);
-            if state == gst_webrtc::WebRTCICEGatheringState::Complete {
-                let Ok(sdp_answer) = webrtcbin_clone
-                    .property::<gst_webrtc::WebRTCSessionDescription>(
-                        "local-description",
-                    )
-                    .sdp()
-                    .as_text()
-                else {
-                    error!("Failed to get SDP answer");
-                    return;
-                };
+        info!("ICE gathering state changed: {:?}", state);
+        if state == gst_webrtc::WebRTCICEGatheringState::Complete {
+            let Ok(sdp_answer) = webrtcbin_clone
+                .property::<gst_webrtc::WebRTCSessionDescription>("local-description")
+                .sdp()
+                .as_text()
+            else {
+                error!("Failed to get SDP answer");
+                return;
+            };
 
-                debug!("Sending SDP answer to main thread {}", sdp_answer);
-                let Ok(_) = tx_clone.send(sdp_answer) else {
-                    error!("Failed to send SDP answer to main thread");
-                    return;
-                };
-            }
-        },
-    );
+            debug!("Sending SDP answer to main thread {}", sdp_answer);
+            let Ok(_) = tx_clone.send(sdp_answer) else {
+                error!("Failed to send SDP answer to main thread");
+                return;
+            };
+        }
+    });
 
     // bus error handling
     let bus = pipeline.bus().ok_or(anyhow!("Failed to get bus"))?;
@@ -404,18 +377,11 @@ fn create_pipeline(
 
     pipeline.set_state(gst::State::Playing)?;
 
-    /*
-        let sdp_offer = "v=0\r\no=- 4611733054762223410 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sendonly\r\na=rtcp-mux\r\na=rtpmap:96 VP8/90000\r\n";
-    */
-
     let sdp = gst_sdp::SDPMessage::parse_buffer(sdp_offer.as_bytes())?;
 
     info!("Parsed SDP offer:\n{}", sdp);
 
-    let offer = gst_webrtc::WebRTCSessionDescription::new(
-        gst_webrtc::WebRTCSDPType::Offer,
-        sdp,
-    );
+    let offer = gst_webrtc::WebRTCSessionDescription::new(gst_webrtc::WebRTCSDPType::Offer, sdp);
 
     let webrtcbin_clone = webrtcbin.clone();
     let promise_offer = gst::Promise::with_change_func(move |reply| {
@@ -429,10 +395,8 @@ fn create_pipeline(
             }
         };
 
-        let offer_desc = webrtcbin_clone
-            .property::<gst_webrtc::WebRTCSessionDescription>(
-                "remote-description",
-            );
+        let offer_desc =
+            webrtcbin_clone.property::<gst_webrtc::WebRTCSessionDescription>("remote-description");
 
         info!("Remote description set: {:?}", offer_desc.sdp().as_text());
 
@@ -446,10 +410,7 @@ fn create_pipeline(
                     None
                 }
                 Err(err) => {
-                    error!(
-                        "Answer creation future got error response: {:?}",
-                        err
-                    );
+                    error!("Answer creation future got error response: {:?}", err);
                     None
                 }
             };
@@ -459,9 +420,7 @@ fn create_pipeline(
                 return;
             };
 
-            let Ok(answer) =
-                reply.get::<gst_webrtc::WebRTCSessionDescription>("answer")
-            else {
+            let Ok(answer) = reply.get::<gst_webrtc::WebRTCSessionDescription>("answer") else {
                 error!("Failed to get SDP answer from reply");
                 return;
             };
@@ -473,22 +432,14 @@ fn create_pipeline(
 
             debug!("Created SDP answer:\n{}", sdp_answer);
 
-            webrtcbin_clone.emit_by_name::<()>(
-                "set-local-description",
-                &[&answer, &None::<gst::Promise>],
-            );
+            webrtcbin_clone
+                .emit_by_name::<()>("set-local-description", &[&answer, &None::<gst::Promise>]);
         });
 
-        webrtcbin_clone2.emit_by_name::<()>(
-            "create-answer",
-            &[&None::<gst::Structure>, &promise],
-        );
+        webrtcbin_clone2.emit_by_name::<()>("create-answer", &[&None::<gst::Structure>, &promise]);
     });
 
-    webrtcbin.emit_by_name::<()>(
-        "set-remote-description",
-        &[&offer, &promise_offer],
-    );
+    webrtcbin.emit_by_name::<()>("set-remote-description", &[&offer, &promise_offer]);
 
     // Start the main loop in a separate thread
     info!("Starting main loop");

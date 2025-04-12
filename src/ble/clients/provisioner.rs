@@ -3,9 +3,7 @@ use super::gatt_uuids::{CHAR_PROV_INFO_UUID, SERV_PROV_INFO_UUID};
 use crate::ble::api::{CmdApi, QueryApi};
 use crate::ble::requester::BleRequester;
 use crate::error::Result;
-use bluer::gatt::local::{
-    characteristic_control, service_control, CharacteristicControlEvent,
-};
+use bluer::gatt::local::{characteristic_control, service_control, CharacteristicControlEvent};
 use bluer::gatt::CharacteristicReader;
 use bluer::{
     adv::Advertisement,
@@ -25,15 +23,11 @@ pub struct ProvisionerClient {
 }
 
 impl ProvisionerClient {
-    pub fn new(
-        ble_adapter: Adapter, server_conn: BleRequester, host_name: String,
-    ) -> Self {
+    pub fn new(ble_adapter: Adapter, server_conn: BleRequester, host_name: String) -> Self {
         let (_tx_drop, _rx_drop) = oneshot::channel();
 
         tokio::spawn(async move {
-            if let Err(e) =
-                provisioner(ble_adapter, _rx_drop, server_conn, host_name).await
-            {
+            if let Err(e) = provisioner(ble_adapter, _rx_drop, server_conn, host_name).await {
                 error!("Provisioner Client failed to start, error: {:?}", e);
             } else {
                 info!("Provisioner Client stopped");
@@ -45,8 +39,7 @@ impl ProvisionerClient {
 }
 
 pub async fn provisioner(
-    adapter: Adapter, mut rx_drop: Receiver<()>, server_conn: BleRequester,
-    host_name: String,
+    adapter: Adapter, mut rx_drop: Receiver<()>, server_conn: BleRequester, host_name: String,
 ) -> Result<()> {
     info!(
         "Advertising Provisioner on Bluetooth adapter {} with address {}",
@@ -62,14 +55,10 @@ pub async fn provisioner(
 
     let _adv_handle = adapter.advertise(le_advertisement).await?;
 
-    info!(
-        "Serving Provisioner GATT service on Bluetooth adapter {}",
-        adapter.name()
-    );
+    info!("Serving Provisioner GATT service on Bluetooth adapter {}", adapter.name());
 
     let (_service_control, service_handle) = service_control();
-    let (char_provisioner_control, char_provisioner_handle) =
-        characteristic_control();
+    let (char_provisioner_control, char_provisioner_handle) = characteristic_control();
 
     let reader_server_requester = server_conn.clone();
     let app = Application {
@@ -81,8 +70,7 @@ pub async fn provisioner(
                 read: Some(CharacteristicRead {
                     read: true,
                     fun: Box::new(move |req| {
-                        let reader_server_requester =
-                            reader_server_requester.clone();
+                        let reader_server_requester = reader_server_requester.clone();
                         async move {
                             match reader_server_requester
                                 .query(

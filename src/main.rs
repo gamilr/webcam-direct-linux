@@ -25,7 +25,6 @@ use ble::{
     },
     server::BleServer,
 };
-use tokio::io::AsyncBufReadExt;
 
 use log::info;
 use vdevice_builder::VDeviceBuilder;

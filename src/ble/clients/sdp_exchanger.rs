@@ -5,9 +5,8 @@ use crate::error::Result;
 use bluer::adv::Advertisement;
 use bluer::gatt::local::{
     characteristic_control, service_control, Application, Characteristic,
-    CharacteristicControlEvent, CharacteristicNotify,
-    CharacteristicNotifyMethod, CharacteristicRead, CharacteristicWrite,
-    CharacteristicWriteMethod, Service,
+    CharacteristicControlEvent, CharacteristicNotify, CharacteristicNotifyMethod,
+    CharacteristicRead, CharacteristicWrite, CharacteristicWriteMethod, Service,
 };
 
 use bluer::gatt::{CharacteristicReader, CharacteristicWriter};
@@ -25,21 +24,14 @@ pub struct SdpExchangerClient {
 
 impl SdpExchangerClient {
     pub fn new(
-        ble_adapter: Adapter, server_conn: BleRequester, host_name: String,
-        host_id: String,
+        ble_adapter: Adapter, server_conn: BleRequester, host_name: String, host_id: String,
     ) -> Self {
         info!("Starting SdpExchangerClient");
 
         let (_tx_drop, _rx_drop) = oneshot::channel();
         tokio::spawn(async move {
-            if let Err(e) = sdp_exchanger(
-                ble_adapter,
-                _rx_drop,
-                server_conn,
-                host_name,
-                host_id,
-            )
-            .await
+            if let Err(e) =
+                sdp_exchanger(ble_adapter, _rx_drop, server_conn, host_name, host_id).await
             {
                 error!("Sdp Exchanger Client failed to start, error: {:?}", e);
             } else {
@@ -52,8 +44,8 @@ impl SdpExchangerClient {
 }
 
 async fn sdp_exchanger(
-    ble_adapter: Adapter, mut rx_drop: Receiver<()>, server_conn: BleRequester,
-    host_name: String, host_id: String,
+    ble_adapter: Adapter, mut rx_drop: Receiver<()>, server_conn: BleRequester, host_name: String,
+    host_id: String,
 ) -> Result<()> {
     info!(
         "Advertising Sdp Exchanger on Bluetooth adapter {} with address {}",
@@ -70,14 +62,10 @@ async fn sdp_exchanger(
 
     let _adv_handle = ble_adapter.advertise(le_advertisement).await?;
 
-    info!(
-        "Serving SDP Exhange GATT service on Bluetooth adapter {}",
-        ble_adapter.name()
-    );
+    info!("Serving SDP Exchange GATT service on Bluetooth adapter {}", ble_adapter.name());
 
     let (_service_control, service_handle) = service_control();
-    let (char_pnp_exchange_control, char_pnp_exchange_handle) =
-        characteristic_control();
+    let (char_pnp_exchange_control, char_pnp_exchange_handle) = characteristic_control();
 
     let reader_server_requester = server_conn.clone();
 
@@ -101,8 +89,7 @@ async fn sdp_exchanger(
                 read: Some(CharacteristicRead {
                     read: true,
                     fun: Box::new(move |req| {
-                        let reader_server_requester =
-                            reader_server_requester.clone();
+                        let reader_server_requester = reader_server_requester.clone();
                         info!(
                             "Accepting read event for pnp with MTU {} from {}",
                             req.mtu,
