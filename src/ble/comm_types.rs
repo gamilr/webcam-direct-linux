@@ -4,20 +4,21 @@ use std::convert::TryFrom;
 use crate::app_data::MobileSchema;
 
 use anyhow::anyhow;
+use rmp_serde::{Deserializer, Serializer};
 use std::io::Cursor;
 
 use anyhow::Result;
 
 pub fn msgpack_ser<T: Serialize>(data: &T) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
-    data.serialize(&mut rmp_serde::Serializer::new(&mut buf))?;
+    let mut serializer = Serializer::new(&mut buf).with_struct_map();
+    data.serialize(&mut serializer)?;
     Ok(buf)
 }
 
 pub fn msgpack_des<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<T> {
-    let mut de_data = rmp_serde::Deserializer::new(Cursor::new(data));
-    T::deserialize(&mut de_data)
-        .map_err(|e| anyhow!("Failed to deserialize data: {}", e))
+    let mut de_data = Deserializer::new(Cursor::new(data));
+    T::deserialize(&mut de_data).map_err(|e| anyhow!("Failed to deserialize data: {}", e))
 }
 
 /// Represents a chunk of data with remaining length and buffer.

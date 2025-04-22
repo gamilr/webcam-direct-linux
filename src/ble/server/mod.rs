@@ -19,8 +19,8 @@ use crate::error::Result;
 
 use super::{
     api::{
-        Address, BleApi, BleComm, CmdApi, CommandReq, PubReq, PubSubSubscriber,
-        PubSubTopic, QueryApi, QueryReq, SubReq,
+        Address, BleApi, BleComm, CmdApi, CommandReq, PubReq, PubSubSubscriber, PubSubTopic,
+        QueryApi, QueryReq, SubReq,
     },
     requester::{BlePublisher, BleRequester},
 };
@@ -33,9 +33,7 @@ use mockall::automock;
 #[async_trait]
 pub trait CommDataService: Send + Sync + 'static {
     //provisioning
-    async fn register_mobile(
-        &mut self, addr: String, mobile: MobileSchema,
-    ) -> Result<()>;
+    async fn register_mobile(&mut self, addr: String, mobile: MobileSchema) -> Result<()>;
 
     async fn get_host_info(&mut self, addr: String) -> Result<HostProvInfo>;
 
@@ -44,12 +42,9 @@ pub trait CommDataService: Send + Sync + 'static {
         &mut self, addr: String, mobile_offer: MobileSdpOffer,
     ) -> Result<()>;
 
-    async fn sub_to_ready_answer(
-        &mut self, addr: String, publisher: BlePublisher,
-    ) -> Result<()>;
+    async fn sub_to_ready_answer(&mut self, addr: String, publisher: BlePublisher) -> Result<()>;
 
-    async fn get_sdp_answer(&mut self, addr: String)
-        -> Result<MobileSdpAnswer>;
+    async fn get_sdp_answer(&mut self, addr: String) -> Result<MobileSdpAnswer>;
 
     //disconnected device
     async fn mobile_disconnected(&mut self, addr: String) -> Result<()>;
@@ -61,9 +56,7 @@ pub struct BleServer {
 }
 
 impl BleServer {
-    pub fn new(
-        mut comm_handler: impl CommDataService, req_buffer_size: usize,
-    ) -> Self {
+    pub fn new(mut comm_handler: impl CommDataService, req_buffer_size: usize) -> Self {
         let (ble_tx, mut ble_rx) = mpsc::channel(req_buffer_size);
         let (_drop_tx, mut _drop_rx) = oneshot::channel();
 
@@ -110,23 +103,19 @@ struct BleServerCommHandler {
 
 impl BleServerCommHandler {
     pub fn new() -> Self {
-        let chunk: Vec<u8> =
-            match (DataChunk { r: MAX_BUFFER_LEN, d: vec![] }.try_into()) {
-                Ok(chunk) => chunk,
-                Err(e) => {
-                    error!("Error creating chunk: {:?}", e);
-                    vec![]
-                }
-            };
+        let chunk: Vec<u8> = match (DataChunk { r: MAX_BUFFER_LEN, d: vec![] }.try_into()) {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                error!("Error creating chunk: {:?}", e);
+                vec![]
+            }
+        };
 
         let chunk_len = chunk.len();
 
         Self {
             buffer_map: MobileBufferMap::new(chunk_len),
-            server_data_cache: ServerDataCache {
-                host_info: None,
-                sdp_answer: HashMap::new(),
-            },
+            server_data_cache: ServerDataCache { host_info: None, sdp_answer: HashMap::new() },
             pubsub_topics_map: HashMap::new(),
             chunk_len,
         }
@@ -134,8 +123,7 @@ impl BleServerCommHandler {
 
     //handle query
     async fn handle_query(
-        &mut self, comm_handler: &mut impl CommDataService, addr: Address,
-        query: QueryReq,
+        &mut self, comm_handler: &mut impl CommDataService, addr: Address, query: QueryReq,
     ) -> Result<CommBuffer> {
         debug!("Query: {:?}", query.query_type);
 
@@ -143,25 +131,18 @@ impl BleServerCommHandler {
         let data = match query.query_type {
             QueryApi::HostInfo => {
                 if self.server_data_cache.host_info.is_none() {
-                    let host_info: Vec<u8> = comm_handler
-                        .get_host_info(addr.clone())
-                        .await?
-                        .try_into()?;
+                    let host_info: Vec<u8> =
+                        comm_handler.get_host_info(addr.clone()).await?.try_into()?;
 
                     self.server_data_cache.host_info = Some(host_info.clone());
                 }
-                self.server_data_cache
-                    .host_info
-                    .as_ref()
-                    .ok_or(anyhow!("Host info not found"))?
+                self.server_data_cache.host_info.as_ref().ok_or(anyhow!("Host info not found"))?
             }
 
             QueryApi::SdpAnswer => {
                 if self.server_data_cache.sdp_answer.get(&addr).is_none() {
-                    let sdp_answer: Vec<u8> = comm_handler
-                        .get_sdp_answer(addr.clone())
-                        .await?
-                        .try_into()?;
+                    let sdp_answer: Vec<u8> =
+                        comm_handler.get_sdp_answer(addr.clone()).await?.try_into()?;
 
                     self.server_data_cache
                         .sdp_answer
@@ -185,13 +166,12 @@ impl BleServerCommHandler {
     }
 
     async fn handle_command(
-        &mut self, comm_handler: &mut impl CommDataService, addr: Address,
-        cmd: CommandReq,
+        &mut self, comm_handler: &mut impl CommDataService, addr: Address, cmd: CommandReq,
     ) -> Result<()> {
         debug!("Command: {:?}", cmd.cmd_type);
+        debug!("Command buffer: {:?}", cmd.payload);
 
-        let Some(buffer) = self.buffer_map.get_complete_buffer(&addr, &cmd)?
-        else {
+        let Some(buffer) = self.buffer_map.get_complete_buffer(&addr, &cmd)? else {
             return Ok(());
         };
 
@@ -203,6 +183,7 @@ impl BleServerCommHandler {
                 comm_handler.mobile_disconnected(addr).await
             }
             CmdApi::RegisterMobile => {
+                debug!("Registering mobile: {:?}", buffer);
                 let mobile = buffer.try_into()?;
                 comm_handler.register_mobile(addr, mobile).await
             }
@@ -215,8 +196,7 @@ impl BleServerCommHandler {
     }
 
     async fn handle_sub(
-        &mut self, comm_handler: &mut impl CommDataService, addr: Address,
-        sub: SubReq,
+        &mut self, comm_handler: &mut impl CommDataService, addr: Address, sub: SubReq,
     ) -> Result<PubSubSubscriber> {
         let SubReq { topic, resp_buffer_len } = sub;
 
@@ -227,9 +207,7 @@ impl BleServerCommHandler {
 
         match topic {
             PubSubTopic::SdpAnswerReady => {
-                comm_handler
-                    .sub_to_ready_answer(addr, publisher.clone())
-                    .await?;
+                comm_handler.sub_to_ready_answer(addr, publisher.clone()).await?;
             }
         };
 
@@ -238,8 +216,7 @@ impl BleServerCommHandler {
     }
 
     async fn handle_pub(
-        &mut self, _comm_handler: &mut impl CommDataService, _addr: Address,
-        pub_req: PubReq,
+        &mut self, _comm_handler: &mut impl CommDataService, _addr: Address, pub_req: PubReq,
     ) -> Result<()> {
         let PubReq { topic, payload } = pub_req;
 
@@ -256,39 +233,29 @@ impl BleServerCommHandler {
 
     //This function does not return a Result since every request is successful
     //if internally any operation fails, it should handle it accordingly
-    pub async fn handle_comm(
-        &mut self, comm_handler: &mut impl CommDataService, comm: BleComm,
-    ) {
+    pub async fn handle_comm(&mut self, comm_handler: &mut impl CommDataService, comm: BleComm) {
         //destructure the request
         let BleComm { addr, comm_api } = comm;
 
         match comm_api {
             BleApi::Query(req, resp) => {
-                if let Err(e) =
-                    resp.send(self.handle_query(comm_handler, addr, req).await)
-                {
+                if let Err(e) = resp.send(self.handle_query(comm_handler, addr, req).await) {
                     error!("Error sending query response: {:?}", e);
                 }
             }
             BleApi::Command(req, resp) => {
-                if let Err(e) = resp
-                    .send(self.handle_command(comm_handler, addr, req).await)
-                {
+                if let Err(e) = resp.send(self.handle_command(comm_handler, addr, req).await) {
                     error!("Error sending command response: {:?}", e);
                 }
             }
             BleApi::Sub(req, resp) => {
-                if let Err(e) =
-                    resp.send(self.handle_sub(comm_handler, addr, req).await)
-                {
+                if let Err(e) = resp.send(self.handle_sub(comm_handler, addr, req).await) {
                     error!("Error sending sub response: {:?}", e);
                 }
             }
 
             BleApi::Pub(req, resp) => {
-                if let Err(e) =
-                    resp.send(self.handle_pub(comm_handler, addr, req).await)
-                {
+                if let Err(e) = resp.send(self.handle_pub(comm_handler, addr, req).await) {
                     error!("Error sending pub response: {:?}", e);
                 }
             }

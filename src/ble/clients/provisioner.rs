@@ -81,6 +81,7 @@ pub async fn provisioner(
                                 .await
                             {
                                 Ok(data) => {
+                                    println!("Read host info: {:?}", data);
                                     return Ok(data);
                                 }
                                 Err(e) => {
@@ -99,40 +100,6 @@ pub async fn provisioner(
                     method: CharacteristicWriteMethod::Io,
                     ..Default::default()
                 }),
-                //write: Some(CharacteristicWrite {
-                //    write: true,
-                //    write_without_response: false,
-                //    method: CharacteristicWriteMethod::Fun(Box::new(
-                //        move |new_value, req| {
-                //            let writer_server_requester =
-                //                writer_server_requester.clone();
-                //            async move {
-                //                    match writer_server_requester
-                //                        .cmd(
-                //                            req.device_address.to_string(),
-                //                            CmdApi::RegisterMobile,
-                //                            new_value
-                //                        )
-                //                        .await
-                //                        {
-                //                            Ok(_) => {
-                //                                info!("Mobile info registered");
-                //                            }
-                //                            Err(e) => {
-                //                                error!(
-                //                                    "Error registering mobile info, {:?}",
-                //                                    e
-                //                                );
-                //                            }
-                //                        }
-
-                //                    Ok(()) //TODO do I need always to return OK?
-                //                }
-                //                .boxed()
-                //        },
-                //    )),
-                //    ..Default::default()
-                //}),
                 control_handle: char_provisioner_handle,
                 ..Default::default()
             }],

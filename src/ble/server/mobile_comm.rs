@@ -58,9 +58,7 @@ pub struct MobileComm<Db, VDevBuilder> {
     vdev_builder: VDevBuilder,
 }
 
-impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps>
-    MobileComm<Db, VDevBuilder>
-{
+impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> MobileComm<Db, VDevBuilder> {
     pub fn new(db: Db, vdev_builder: VDevBuilder) -> Result<Self> {
         Ok(Self { db, mobiles_connected: HashMap::new(), vdev_builder })
     }
@@ -77,9 +75,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
         self.db.get_host_prov_info()
     }
 
-    async fn register_mobile(
-        &mut self, addr: Address, mobile: MobileSchema,
-    ) -> Result<()> {
+    async fn register_mobile(&mut self, addr: Address, mobile: MobileSchema) -> Result<()> {
         debug!("Registering mobile: {:?}", addr);
 
         //add the mobile to the db
@@ -87,16 +83,12 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
     }
 
     //call establishment
-    async fn sub_to_ready_answer(
-        &mut self, addr: Address, publisher: BlePublisher,
-    ) -> Result<()> {
+    async fn sub_to_ready_answer(&mut self, addr: Address, publisher: BlePublisher) -> Result<()> {
         debug!("Subscribing to SDP call: {:?}", addr);
 
         //add the publisher to for this mobile
-        self.mobiles_connected.insert(
-            addr,
-            DeviceInfo { publisher: Some(publisher), vdevices: HashMap::new() },
-        );
+        self.mobiles_connected
+            .insert(addr, DeviceInfo { publisher: Some(publisher), vdevices: HashMap::new() });
 
         Ok(())
     }
@@ -115,15 +107,11 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
         if let Some(vdevice_info) = self.mobiles_connected.get_mut(&addr) {
             if let Some(publisher) = &vdevice_info.publisher {
                 //create the virtual devices
-                vdevice_info.vdevices = self
-                    .vdev_builder
-                    .create_from(mobile.name, camera_offer)
-                    .await?;
+                vdevice_info.vdevices =
+                    self.vdev_builder.create_from(mobile.name, camera_offer).await?;
 
                 //notify the mobile the SDP answer are ready
-                publisher
-                    .publish(SdpAnswerReady { mobile_id }.try_into()?)
-                    .await?;
+                publisher.publish(SdpAnswerReady { mobile_id }.try_into()?).await?;
             } else {
                 return Err(anyhow!("Publisher not found for mobile"));
             }
@@ -134,9 +122,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
         Ok(())
     }
 
-    async fn get_sdp_answer(
-        &mut self, addr: Address,
-    ) -> Result<MobileSdpAnswer> {
+    async fn get_sdp_answer(&mut self, addr: Address) -> Result<MobileSdpAnswer> {
         debug!("SDP answer requested by: {:?}", addr);
 
         let vdevice_info = self
@@ -160,10 +146,7 @@ impl<Db: AppDataStore, VDevBuilder: VDeviceBuilderOps> CommDataService
     //disconnect the mobile device
     async fn mobile_disconnected(&mut self, addr: Address) -> Result<()> {
         if let Some(_) = self.mobiles_connected.remove(&addr) {
-            debug!(
-                "Mobile: {:?} disconnected and removed from connected devices",
-                addr
-            );
+            debug!("Mobile: {:?} disconnected and removed from connected devices", addr);
 
             return Ok(());
         }

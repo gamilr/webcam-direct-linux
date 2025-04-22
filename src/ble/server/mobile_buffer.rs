@@ -12,9 +12,7 @@
 
 use crate::ble::api::MAX_BUFFER_LEN;
 
-use crate::ble::api::{
-    Address, CmdApi, CommBuffer, CommandReq, QueryApi, QueryReq,
-};
+use crate::ble::api::{Address, CmdApi, CommBuffer, CommandReq, QueryApi, QueryReq};
 use crate::ble::comm_types::DataChunk;
 use crate::error::Result;
 use log::{error, info, warn};
@@ -67,10 +65,7 @@ impl MobileBufferMap {
     /// ```
     pub fn remove_mobile(&mut self, addr: &str) {
         if let None = self.mobile_buffer_status.remove(addr) {
-            warn!(
-                "Mobile with addr: {} does not exist in the buffer map",
-                addr
-            );
+            warn!("Mobile with addr: {} does not exist in the buffer map", addr);
         }
     }
 
@@ -86,9 +81,7 @@ impl MobileBufferMap {
     /// ```
     ///
     fn get_cursors(&mut self, addr: &str) -> &mut BufferCursor {
-        self.mobile_buffer_status
-            .entry(addr.to_string())
-            .or_insert(Default::default())
+        self.mobile_buffer_status.entry(addr.to_string()).or_insert(Default::default())
     }
 
     /// Retrieves a data chunk for a mobile device based on the current buffer state.
@@ -135,17 +128,11 @@ impl MobileBufferMap {
             *remain_len -= resp_buffer_len;
         }
 
-        let data_chunk = DataChunk {
-            r: *remain_len,
-            d: data[chunk_start..chunk_end].to_owned(),
-        };
+        let data_chunk = DataChunk { r: *remain_len, d: data[chunk_start..chunk_end].to_owned() };
 
         if data_chunk.r == 0 || resp_buffer_len > MAX_BUFFER_LEN {
             if resp_buffer_len > MAX_BUFFER_LEN {
-                warn!(
-                    "Max buffer limit reached for mobile with addr: {}",
-                    addr
-                );
+                warn!("Max buffer limit reached for mobile with addr: {}", addr);
             }
 
             reader.remove(query_type); //remove the reader channel when done
@@ -256,16 +243,10 @@ mod tests {
         let expected_len = 100;
         let allowed_data_len = 100 - CHUNK_LEN;
         let data = vec![55; allowed_data_len]; // Simple data
-        let query = QueryReq {
-            query_type: QueryApi::HostInfo,
-            resp_buffer_len: expected_len,
-        };
+        let query = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: expected_len };
 
-        let chunk: DataChunk = buffer_map
-            .get_next_data_chunk(addr, &query, &data)
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let chunk: DataChunk =
+            buffer_map.get_next_data_chunk(addr, &query, &data).unwrap().try_into().unwrap();
 
         assert_eq!(chunk.r, 0);
         assert_eq!(chunk.d.len(), allowed_data_len);
@@ -280,19 +261,15 @@ mod tests {
         let expected_len = 5000;
         let data = vec![55; expected_len]; // Large data
         let resp_buffer_len = 1024;
-        let query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+        let query = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
 
         let allowed_data_len = resp_buffer_len - CHUNK_LEN;
 
         let mut chunks = Vec::new();
 
         loop {
-            let chunk: DataChunk = buffer_map
-                .get_next_data_chunk(addr, &query, &data)
-                .unwrap()
-                .try_into()
-                .unwrap();
+            let chunk: DataChunk =
+                buffer_map.get_next_data_chunk(addr, &query, &data).unwrap().try_into().unwrap();
 
             chunks.push(chunk.clone());
             if chunk.r == 0 {
@@ -325,16 +302,11 @@ mod tests {
         let mut chunks = Vec::new();
 
         let mut max_buffer_len = 15;
-        let mut query = QueryReq {
-            query_type: QueryApi::HostInfo,
-            resp_buffer_len: max_buffer_len,
-        };
+        let mut query =
+            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: max_buffer_len };
         loop {
-            let chunk: DataChunk = buffer_map
-                .get_next_data_chunk(addr, &query, &data)
-                .unwrap()
-                .try_into()
-                .unwrap();
+            let chunk: DataChunk =
+                buffer_map.get_next_data_chunk(addr, &query, &data).unwrap().try_into().unwrap();
             chunks.push(chunk.clone());
             debug!("Chunk: {:?}", chunk);
             if chunk.r == 0 {
@@ -358,19 +330,15 @@ mod tests {
 
         let resp_buffer_len = 15;
 
-        let query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+        let query = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
 
         let allowed_data_len = resp_buffer_len - CHUNK_LEN;
 
         let mut chunks = Vec::new();
 
         loop {
-            let chunk: DataChunk = buffer_map
-                .get_next_data_chunk(addr, &query, &data)
-                .unwrap()
-                .try_into()
-                .unwrap();
+            let chunk: DataChunk =
+                buffer_map.get_next_data_chunk(addr, &query, &data).unwrap().try_into().unwrap();
             chunks.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -387,8 +355,7 @@ mod tests {
         //start again
         chunks = Vec::new();
         let resp_buffer_len = 13;
-        let new_query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+        let new_query = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
 
         let allowed_data_len = resp_buffer_len - CHUNK_LEN;
         loop {
@@ -420,27 +387,17 @@ mod tests {
         let expected_len = 100;
         let allowed_data_len = 100 - CHUNK_LEN;
         let data = vec![55; allowed_data_len]; // Large data
-        let query = QueryReq {
-            query_type: QueryApi::HostInfo,
-            resp_buffer_len: expected_len,
-        };
+        let query = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: expected_len };
 
-        let chunk: DataChunk = buffer_map
-            .get_next_data_chunk(addr, &query, &data)
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let chunk: DataChunk =
+            buffer_map.get_next_data_chunk(addr, &query, &data).unwrap().try_into().unwrap();
 
         assert_eq!(chunk.r, 0);
 
-        let cmd = CommandReq {
-            cmd_type: CmdApi::MobileDisconnected,
-            payload: chunk.try_into().unwrap(),
-        };
+        let cmd =
+            CommandReq { cmd_type: CmdApi::MobileDisconnected, payload: chunk.try_into().unwrap() };
 
-        if let Some(buffer) =
-            buffer_map.get_complete_buffer(addr, &cmd).unwrap()
-        {
+        if let Some(buffer) = buffer_map.get_complete_buffer(addr, &cmd).unwrap() {
             assert_eq!(buffer.len(), allowed_data_len);
         }
     }
@@ -453,16 +410,12 @@ mod tests {
 
         let expected_len = 3355;
         let data = vec![55; expected_len]; // Large data
-        let query =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 512 };
+        let query = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: 512 };
         let mut chunks = Vec::new();
 
         loop {
-            let chunk: DataChunk = buffer_map
-                .get_next_data_chunk(addr, &query, &data)
-                .unwrap()
-                .try_into()
-                .unwrap();
+            let chunk: DataChunk =
+                buffer_map.get_next_data_chunk(addr, &query, &data).unwrap().try_into().unwrap();
             chunks.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -475,9 +428,7 @@ mod tests {
                 cmd_type: CmdApi::MobileDisconnected,
                 payload: chunks[indx].clone().try_into().unwrap(),
             };
-            if let Some(buffer) =
-                buffer_map.get_complete_buffer(addr, &cmd).unwrap()
-            {
+            if let Some(buffer) = buffer_map.get_complete_buffer(addr, &cmd).unwrap() {
                 assert_eq!(buffer.len(), expected_len);
                 break;
             }
@@ -498,10 +449,8 @@ mod tests {
         let data2 = vec![66; expected_len]; // Large data
 
         let resp_buffer_len = 100 + CHUNK_LEN;
-        let query1 =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
-        let query2 =
-            QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+        let query1 = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
+        let query2 = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len };
 
         let allowed_data_len = resp_buffer_len - CHUNK_LEN;
 
@@ -509,11 +458,8 @@ mod tests {
         let mut chunks2 = Vec::new();
 
         loop {
-            let chunk: DataChunk = buffer_map
-                .get_next_data_chunk(addr1, &query1, &data1)
-                .unwrap()
-                .try_into()
-                .unwrap();
+            let chunk: DataChunk =
+                buffer_map.get_next_data_chunk(addr1, &query1, &data1).unwrap().try_into().unwrap();
             chunks1.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -521,11 +467,8 @@ mod tests {
         }
 
         loop {
-            let chunk: DataChunk = buffer_map
-                .get_next_data_chunk(addr2, &query2, &data2)
-                .unwrap()
-                .try_into()
-                .unwrap();
+            let chunk: DataChunk =
+                buffer_map.get_next_data_chunk(addr2, &query2, &data2).unwrap().try_into().unwrap();
             chunks2.push(chunk.clone());
             if chunk.r == 0 {
                 break;
@@ -569,18 +512,14 @@ mod tests {
         let mut buffer1 = Vec::new();
         let mut buffer2 = Vec::new();
 
-        while let Some(chunk) =
-            buffer_map.get_complete_buffer(addr, &cmd1).unwrap()
-        {
+        while let Some(chunk) = buffer_map.get_complete_buffer(addr, &cmd1).unwrap() {
             buffer1.extend_from_slice(&chunk);
             if buffer1.len() >= data1.len() {
                 break;
             }
         }
 
-        while let Some(chunk) =
-            buffer_map.get_complete_buffer(addr, &cmd2).unwrap()
-        {
+        while let Some(chunk) = buffer_map.get_complete_buffer(addr, &cmd2).unwrap() {
             buffer2.extend_from_slice(&chunk);
             if buffer2.len() >= data2.len() {
                 break;
@@ -628,17 +567,13 @@ mod tests {
         let mut chunks_itr = chunks1.iter();
         let mut chunks_itr2 = chunks2.iter();
 
-        while let (Some(chunk1), Some(chunk2)) =
-            (chunks_itr.next(), chunks_itr2.next())
-        {
+        while let (Some(chunk1), Some(chunk2)) = (chunks_itr.next(), chunks_itr2.next()) {
             let cmd = CommandReq {
                 cmd_type: CmdApi::RegisterMobile,
                 payload: chunk1.clone().try_into().unwrap(),
             };
 
-            if let Some(buffer1) =
-                buffer_map.get_complete_buffer(addr, &cmd).unwrap()
-            {
+            if let Some(buffer1) = buffer_map.get_complete_buffer(addr, &cmd).unwrap() {
                 assert_eq!(buffer1.len(), expected_len);
                 assert_eq!(buffer1, data1);
             }
@@ -648,9 +583,7 @@ mod tests {
                 payload: chunk2.clone().try_into().unwrap(),
             };
 
-            if let Some(buffer2) =
-                buffer_map.get_complete_buffer(addr, &cmd).unwrap()
-            {
+            if let Some(buffer2) = buffer_map.get_complete_buffer(addr, &cmd).unwrap() {
                 assert_eq!(buffer2.len(), expected_len);
                 assert_eq!(buffer2, data2);
             }

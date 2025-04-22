@@ -2,12 +2,10 @@ use crate::error::Result;
 use anyhow::anyhow;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-
 use super::{
     api::{
-        BleApi, BleComm, CmdApi, CommBuffer, CommandReq, PubReq,
-        PubSubPublisher, PubSubSubscriber, PubSubTopic, QueryApi, QueryReq,
-        SubReq,
+        BleApi, BleComm, CmdApi, CommBuffer, CommandReq, PubReq, PubSubPublisher, PubSubSubscriber,
+        PubSubTopic, QueryApi, QueryReq, SubReq,
     },
     comm_types::DataChunk,
 };
@@ -36,9 +34,7 @@ impl BleRequester {
         rx.await?
     }
 
-    pub async fn cmd(
-        &self, addr: String, cmd_type: CmdApi, data: CommBuffer,
-    ) -> Result<()> {
+    pub async fn cmd(&self, addr: String, cmd_type: CmdApi, data: CommBuffer) -> Result<()> {
         //create the command request
         let cmd_req = CommandReq { cmd_type, payload: data };
 
@@ -66,9 +62,7 @@ impl BleRequester {
     }
 
     #[allow(dead_code)]
-    pub async fn publish(
-        &self, addr: String, topic: PubSubTopic, data: Vec<u8>,
-    ) -> Result<()> {
+    pub async fn publish(&self, addr: String, topic: PubSubTopic, data: Vec<u8>) -> Result<()> {
         let pub_req = PubReq { topic, payload: data };
 
         let (tx, rx) = oneshot::channel();
@@ -122,9 +116,6 @@ impl BleSubscriber {
     }
 
     pub async fn recv(&mut self) -> Result<Vec<u8>> {
-        self.subscriber_rx
-            .recv()
-            .await
-            .map_err(|_| anyhow!("Subscriber dropped"))
+        self.subscriber_rx.recv().await.map_err(|_| anyhow!("Subscriber dropped"))
     }
 }
