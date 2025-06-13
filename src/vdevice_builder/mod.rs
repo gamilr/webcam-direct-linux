@@ -26,14 +26,14 @@ impl VDeviceBuilder {
         let mut is_videodev_loaded = false;
         //check for videodev module
         if !is_kmodule_loaded("/proc/modules", "videodev").await? {
-            is_v4l2loopback_loaded = true;
+            is_videodev_loaded = true;
             load_kmodule("videodev", None).await?;
             update_dir_permissions("/dev/v4l2loopback", "o+r").await?;
         }
 
         //check for v4l2loopback module
         if !is_kmodule_loaded("/proc/modules", "v4l2loopback").await? {
-            is_videodev_loaded = true;
+            is_v4l2loopback_loaded = true;
             load_kmodule("v4l2loopback", Some(&["exclusive_caps=1"])).await?;
         }
 
