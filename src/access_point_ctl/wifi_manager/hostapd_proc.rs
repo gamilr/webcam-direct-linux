@@ -1,5 +1,5 @@
-//! This module contains the implementation to handle the dnsmasq process as a child process.
-//! It provides structures and traits to manage the Hostapd process, which is used to create a WiFi access point.
+//! This module contains the implementation to handle the hostapd process as a child process.
+//! It provides structures and traits to manage the hostapd daemon, which is used to create a WiFi access point.
 
 use super::super::process_hdl::ProcessHdlOps;
 use super::file_hdl::FileHdlOps;
