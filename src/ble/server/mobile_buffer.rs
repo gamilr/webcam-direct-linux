@@ -17,6 +17,7 @@ use crate::ble::api::{
 };
 use crate::ble::comm_types::DataChunk;
 use crate::error::Result;
+use anyhow::anyhow;
 use log::{error, info, warn};
 use std::collections::HashMap;
 
@@ -116,7 +117,15 @@ impl MobileBufferMap {
     ) -> Result<Vec<u8>> {
         let QueryReq { query_type, resp_buffer_len } = query;
 
-        let resp_buffer_len = resp_buffer_len - self.chunk_len;
+        // Subtract the `DataChunk` overhead from the maximum buffer length.
+        // Use `saturating_sub` to avoid underflow if the provided
+        // `resp_buffer_len` is smaller than the overhead length. If the result
+        // is zero no payload bytes would fit, so return an error to avoid an
+        // endless loop of empty chunks.
+        let resp_buffer_len = resp_buffer_len.saturating_sub(self.chunk_len);
+        if resp_buffer_len == 0 {
+            return Err(anyhow!("Response buffer length too small"));
+        }
 
         let data = data.as_ref();
 
@@ -269,6 +278,19 @@ mod tests {
 
         assert_eq!(chunk.r, 0);
         assert_eq!(chunk.d.len(), allowed_data_len);
+    }
+
+    #[test]
+    fn test_get_next_data_chunk_buffer_too_small() {
+        init_test();
+        let mut buffer_map = MobileBufferMap::new(CHUNK_LEN);
+        let addr = "AA:BB:CC:DD:EE:11";
+
+        let data = vec![0u8; 10];
+        // resp_buffer_len smaller than the overhead should return an error
+        let query = QueryReq { query_type: QueryApi::HostInfo, resp_buffer_len: CHUNK_LEN - 1 };
+
+        assert!(buffer_map.get_next_data_chunk(addr, &query, &data).is_err());
     }
 
     #[test]
